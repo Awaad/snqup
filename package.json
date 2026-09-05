@@ -1,0 +1,45 @@
+{
+  "name": "acme",
+  "private": true,
+  "packageManager": "pnpm@11.25.0",
+  "engines": {
+    "node": ">=24.0.0 <25",
+    "pnpm": ">=11.25.0 <12"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "lint:fix": "turbo run lint:fix",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "test:e2e": "turbo run test:e2e",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
+    "generate": "pnpm generate:tokens && pnpm generate:api",
+    "generate:tokens": "pnpm --filter @acme/tokens generate",
+    "generate:api": "pnpm --filter @acme/api-client generate",
+    "generate:check": "pnpm generate && git diff --exit-code -- packages/tokens/dist packages/api-client/src",
+    "api": "cd apps/api && uv run uvicorn acme.main:app --reload",
+    "api:test": "cd apps/api && uv run pytest",
+    "api:lint": "cd apps/api && uv run ruff check . && uv run ruff format --check .",
+    "api:typecheck": "cd apps/api && uv run mypy src",
+    "api:boundaries": "cd apps/api && uv run lint-imports",
+    "api:migrate": "cd apps/api && uv run alembic upgrade head",
+    "mobile": "pnpm --filter @acme/mobile start",
+    "db:up": "docker compose -f infra/compose/docker-compose.dev.yml up -d",
+    "db:down": "docker compose -f infra/compose/docker-compose.dev.yml down",
+    "db:reset": "docker compose -f infra/compose/docker-compose.dev.yml down -v && pnpm db:up",
+    "prepare": "husky || true"
+  },
+  "devDependencies": {
+    "@types/node": "26.4.1",
+    "eslint": "10.10.0",
+    "prettier": "3.9.6",
+    "turbo": "2.10.12",
+    "typescript": "7.0.2"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild", "sharp"]
+  }
+}
