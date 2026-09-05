@@ -1,0 +1,67 @@
+# Fast checks only. Anything over a few seconds belongs in CI, or people
+# bypass the hook once and then bypass it habitually.
+default_install_hook_types: [pre-commit, commit-msg]
+fail_fast: false
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=512]
+      - id: check-yaml
+        exclude: ^infra/compose/.*\.yml$
+      - id: check-json
+      - id: check-toml
+      - id: mixed-line-ending
+        args: [--fix=lf]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.6
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+        files: ^apps/api/
+      - id: ruff-format
+        files: ^apps/api/
+
+  # ADR-0013. A credential committed in plaintext must be rotated even after
+  # a history rewrite, because it may already be cloned or cached.
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: [--baseline, .secrets.baseline]
+        exclude: pnpm-lock\.yaml|uv\.lock
+
+  - repo: local
+    hooks:
+      - id: eslint
+        name: eslint
+        entry: pnpm exec eslint --fix --max-warnings=0
+        language: system
+        types_or: [ts, tsx, javascript, jsx]
+        pass_filenames: true
+
+      - id: prettier
+        name: prettier
+        entry: pnpm exec prettier --write
+        language: system
+        types_or: [ts, tsx, javascript, jsx, json, markdown, yaml]
+
+      # 00-context/naming.md: keep the placeholder out of anything expensive
+      # to rename. Without this the rename runbook takes hours, not minutes.
+      - id: placeholder-check
+        name: no placeholder in locales, migrations or infra
+        entry: scripts/check-placeholder.sh
+        language: script
+        pass_filenames: false
+
+      - id: no-price-strings
+        name: no hardcoded prices
+        entry: scripts/check-no-prices.sh
+        language: script
+        pass_filenames: false
