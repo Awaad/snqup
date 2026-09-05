@@ -1,0 +1,50 @@
+# Enforces ADR-0025. Convention alone does not hold this line; without a tool
+# the domains become notional within a month.
+
+[importlinter]
+root_package = acme
+include_external_packages = True
+
+[importlinter:contract:1]
+name = Domains may not import each other's internals
+type = forbidden
+source_modules =
+    acme.domains.identity
+    acme.domains.cards
+    acme.domains.exchange
+    acme.domains.connections
+    acme.domains.events
+    acme.domains.billing
+    acme.domains.safety
+forbidden_modules =
+    acme.domains.identity.repository
+    acme.domains.cards.repository
+    acme.domains.exchange.repository
+    acme.domains.connections.repository
+    acme.domains.events.repository
+    acme.domains.billing.repository
+    acme.domains.safety.repository
+    acme.domains.identity.models
+    acme.domains.cards.models
+    acme.domains.exchange.models
+    acme.domains.connections.models
+    acme.domains.events.models
+    acme.domains.billing.models
+    acme.domains.safety.models
+allow_indirect_imports = False
+
+[importlinter:contract:2]
+name = Core is independent of every domain
+type = forbidden
+source_modules =
+    acme.core
+forbidden_modules =
+    acme.domains
+
+[importlinter:contract:3]
+name = Layers
+type = layers
+layers =
+    acme.api
+    acme.domains
+    acme.core
