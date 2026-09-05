@@ -1,0 +1,49 @@
+name: Scheduled
+
+on:
+  schedule:
+    - cron: '0 6 * * *' # daily security audit
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  security-audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - run: npm install -g pnpm@11.25.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Audit npm dependencies
+        run: pnpm audit --audit-level=high
+
+      - uses: astral-sh/setup-uv@v10
+        with:
+          python-version: '3.13'
+      - name: Audit Python dependencies
+        working-directory: apps/api
+        run: |
+          uv sync --frozen
+          uv tool install pip-audit
+          uv tool run pip-audit
+
+  # ADR-0009: webhooks get missed. Repeated divergence indicates a handler bug,
+  # so this alerts rather than silently repairing.
+  billing-reconciliation:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Trigger reconciliation
+        env:
+          API_URL: ${{ secrets.API_URL }}
+          TOKEN: ${{ secrets.INTERNAL_JOB_TOKEN }}
+        run: |
+          curl -sf -X POST "$API_URL/internal/jobs/reconcile-billing" \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Idempotency-Key: $(uuidgen)"

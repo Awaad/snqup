@@ -1,0 +1,268 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '24'
+  PNPM_VERSION: '11.25.0'
+  PYTHON_VERSION: '3.13'
+  TURBO_TELEMETRY_DISABLED: '1'
+
+jobs:
+  # -------------------------------------------------------------------------
+  # TypeScript
+  # -------------------------------------------------------------------------
+  node:
+    name: node (${{ matrix.task }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        task: [lint, typecheck, test, build]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2 # turbo needs the previous commit for affected detection
+
+      # Installed via npm rather than a third-party action: one less
+      # supply-chain surface, and fully deterministic at an exact version.
+      - name: Install pnpm
+        run: npm install -g pnpm@${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run ${{ matrix.task }}
+        run: pnpm ${{ matrix.task }}
+
+  # -------------------------------------------------------------------------
+  # Python
+  # -------------------------------------------------------------------------
+  api:
+    name: api (${{ matrix.task }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        task: [lint, typecheck, boundaries]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        working-directory: apps/api
+        run: uv sync --frozen --all-groups
+
+      - name: Lint
+        if: matrix.task == 'lint'
+        working-directory: apps/api
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+
+      - name: Typecheck
+        if: matrix.task == 'typecheck'
+        working-directory: apps/api
+        run: uv run mypy src
+
+      # ADR-0025. Without this the domain boundaries are notional.
+      - name: Domain boundaries
+        if: matrix.task == 'boundaries'
+        working-directory: apps/api
+        run: uv run lint-imports
+
+  api-tests:
+    name: api tests
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        # Real Postgres, not SQLite. Partial indexes, citext, JSONB operators
+        # and LISTEN/NOTIFY are all load-bearing and none work on SQLite.
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: acme_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports: ['5432:5432']
+      redis:
+        image: valkey/valkey:8-alpine
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports: ['6379:6379']
+    env:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/acme_test
+      DATABASE_LISTEN_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/acme_test
+      REDIS_URL: redis://localhost:6379/0
+      JWT_ISSUER: https://test.local
+      JWT_AUDIENCE: acme-test
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        working-directory: apps/api
+        run: uv sync --frozen --all-groups
+
+      - name: Migrate
+        working-directory: apps/api
+        run: uv run alembic upgrade head
+
+      - name: Test
+        working-directory: apps/api
+        run: uv run pytest --cov=acme --cov-report=term-missing
+
+  # -------------------------------------------------------------------------
+  # Contract drift. Without this the TypeScript view of the API diverges from
+  # the Pydantic models within about a month, and the failures are silent.
+  # -------------------------------------------------------------------------
+  generated:
+    name: generated artifacts are current
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - run: npm install -g pnpm@${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - run: pnpm install --frozen-lockfile
+      - name: Install API dependencies
+        working-directory: apps/api
+        run: uv sync --frozen
+
+      - name: Export OpenAPI schema
+        working-directory: apps/api
+        run: uv run python -m acme.scripts.export_openapi > ../../packages/api-client/openapi.json
+
+      - name: Regenerate
+        run: pnpm generate
+
+      - name: Fail on drift
+        run: |
+          if ! git diff --exit-code -- packages/; then
+            echo
+            echo "Generated artifacts are stale. Run 'pnpm generate' and commit."
+            echo "Never hand-edit generated files (ADR-0014)."
+            exit 1
+          fi
+
+  # -------------------------------------------------------------------------
+  # Guards
+  # -------------------------------------------------------------------------
+  guards:
+    name: guards
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Secret scan
+        run: |
+          uv tool install detect-secrets==1.5.0
+          uv tool run detect-secrets scan --baseline .secrets.baseline
+
+      - name: Placeholder check
+        run: ./scripts/check-placeholder.sh
+
+      - name: No hardcoded prices
+        run: ./scripts/check-no-prices.sh
+
+      # ADR-0009: an organizer upsell in the mobile app is an App Store
+      # rejection risk, and it will be tempting on the events screen.
+      - name: No organizer upsell in mobile
+        run: ./scripts/check-no-organizer-upsell.sh
+
+  # -------------------------------------------------------------------------
+  # Migrations. Expand-contract is mandatory because old app versions hit the
+  # new schema (schema/migration-policy.md).
+  # -------------------------------------------------------------------------
+  migrations:
+    name: migrations
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: acme_migrations
+        options: >-
+          --health-cmd pg_isready --health-interval 10s
+          --health-timeout 5s --health-retries 5
+        ports: ['5432:5432']
+    env:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/acme_migrations
+      DATABASE_LISTEN_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/acme_migrations
+      REDIS_URL: redis://localhost:6379/0
+      JWT_ISSUER: https://test.local
+      JWT_AUDIENCE: acme-test
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        working-directory: apps/api
+        run: uv sync --frozen --all-groups
+
+      - name: Up
+        working-directory: apps/api
+        run: uv run alembic upgrade head
+
+      # A down migration that silently drops a column is worse than none,
+      # because it looks safe. Irreversible ones must raise explicitly.
+      - name: Down then up again
+        working-directory: apps/api
+        run: |
+          uv run alembic downgrade base
+          uv run alembic upgrade head
+
+      - name: No multiple heads
+        working-directory: apps/api
+        run: |
+          heads=$(uv run alembic heads | wc -l)
+          if [ "$heads" -ne 1 ]; then
+            echo "error: $heads migration heads. Merge them before landing."
+            exit 1
+          fi

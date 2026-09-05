@@ -1,0 +1,106 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: choice
+        options: [staging, production]
+        required: true
+      image_tag:
+        description: Image tag to deploy (blank = build from this ref)
+        type: string
+        required: false
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: ${{ github.repository }}/api
+
+jobs:
+  build:
+    if: inputs.image_tag == ''
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: meta
+        run: echo "tag=sha-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./apps/api
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ steps.meta.outputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Order is fixed (runbooks/deploy.md): the migration runs first and alone.
+  # Because migrations are expand-only, the OLD application version keeps
+  # working between the two steps. That is what makes rollback safe.
+  migrate:
+    needs: [build]
+    if: always() && !cancelled() && !failure()
+    runs-on: ubuntu-24.04
+    environment: ${{ inputs.environment || 'staging' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+        with:
+          python-version: '3.13'
+
+      - name: Run migrations
+        working-directory: apps/api
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          uv sync --frozen
+          # Fail fast rather than queueing every request behind a blocked
+          # migration (schema/migration-policy.md).
+          PGOPTIONS="-c lock_timeout=5000 -c statement_timeout=300000" \
+            uv run alembic upgrade head
+
+  deploy:
+    needs: [build, migrate]
+    if: always() && needs.migrate.result == 'success'
+    runs-on: ubuntu-24.04
+    environment: ${{ inputs.environment || 'staging' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Deploy over SSH
+        env:
+          TAG: ${{ inputs.image_tag || needs.build.outputs.tag }}
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          HOST: ${{ secrets.DEPLOY_HOST }}
+        run: ./infra/scripts/deploy.sh
+
+      # Health-gated: if readiness never passes, the old container keeps
+      # serving and the deploy is treated as failed.
+      - name: Verify
+        env:
+          API_URL: ${{ secrets.API_URL }}
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf "$API_URL/health/ready"; then
+              echo "ready"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "error: readiness never passed. Roll back (runbooks/rollback.md)."
+          exit 1
