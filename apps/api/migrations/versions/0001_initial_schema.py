@@ -94,22 +94,25 @@ $$ LANGUAGE plpgsql;
 
 
 -- =============================================================================
--- ENUMS
+-- CONSTRAINED VALUE SETS
 -- =============================================================================
-
-CREATE TYPE card_kind          AS ENUM ('personal', 'business', 'custom');
-CREATE TYPE token_kind         AS ENUM ('live', 'static');
-CREATE TYPE scan_channel       AS ENUM ('qr_live', 'qr_static', 'nfc', 'link', 'wallet');
-CREATE TYPE connection_state   AS ENUM ('pending', 'confirmed', 'declined');
-CREATE TYPE connection_visibility AS ENUM ('private', 'discoverable');
-CREATE TYPE event_visibility   AS ENUM ('private', 'unlisted', 'public');
-CREATE TYPE org_role           AS ENUM ('owner', 'admin', 'member');
-CREATE TYPE event_staff_role   AS ENUM ('owner', 'manager', 'scanner', 'viewer');
-CREATE TYPE entitlement_source AS ENUM ('apple', 'stripe', 'google', 'manual');
-CREATE TYPE entitlement_status AS ENUM ('active', 'grace', 'expired', 'revoked');
-CREATE TYPE subject_kind       AS ENUM ('user', 'organization');
-CREATE TYPE report_status      AS ENUM ('open', 'actioned', 'dismissed');
-
+-- text + CHECK, NOT Postgres enums.
+--
+-- We are pre-launch and still discovering the domain, and enums are the wrong
+-- shape for that. ALTER TYPE ... ADD VALUE cannot run inside a transaction,
+-- and a value can never be REMOVED or safely renamed - get a name wrong today
+-- and you carry it forever, or run a three-release add-migrate-remove dance.
+--
+-- A CHECK constraint is dropped and re-added in one ordinary transactional
+-- migration, and it enforces exactly the same set. Storage costs a few bytes
+-- per row, which is irrelevant here.
+--
+-- The Python StrEnums in each domain's enums.py remain the typed source, and
+-- tests/test_enum_sync.py compares them against these constraints in both
+-- directions.
+--
+-- Constraint naming is `<table>_<column>_check_values` so the drift test can
+-- find them and so a violation message names the column.
 
 -- =============================================================================
 -- IDENTITY
@@ -164,7 +167,18 @@ CREATE TABLE organizations (
     id                  uuid PRIMARY KEY,
     name                text NOT NULL,
     slug                citext NOT NULL,
-    brand               jsonb NOT NULL DEFAULT '{}'::jsonb,  -- logo, colours, enforced card style
+    -- Functional, so a column rather than a key in `brand`. It seeds
+    -- domain_verifications, which gates public indexed event pages and the
+    -- verified badge. Anything queried or acted on gets a column; `brand` is
+    -- for presentation only, or it becomes a junk drawer nobody can query.
+    website             text,
+    description         text,
+    logo_path           text,                       -- object storage key
+    -- Purely presentational: colours, typography, enforced card styling.
+    brand               jsonb NOT NULL DEFAULT '{}'::jsonb,
+    -- A solo organizer's personal organization, created automatically at
+    -- organizer signup. See events.organization_id for why this exists.
+    is_personal         boolean NOT NULL DEFAULT false,
     created_at          timestamptz NOT NULL DEFAULT now(),
     updated_at          timestamptz NOT NULL DEFAULT now(),
     deleted_at          timestamptz
@@ -183,10 +197,11 @@ CREATE TABLE organization_members (
     id                  uuid PRIMARY KEY,
     organization_id     uuid NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     user_id             uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    role                org_role NOT NULL,
+    role                text NOT NULL,
     invited_at          timestamptz NOT NULL DEFAULT now(),
     accepted_at         timestamptz,
-    deleted_at          timestamptz
+    deleted_at          timestamptz,
+    CONSTRAINT organization_members_role_check_values CHECK (role IN ('owner', 'admin', 'member'))
 );
 CREATE UNIQUE INDEX org_members_active_idx
     ON organization_members (organization_id, user_id) WHERE deleted_at IS NULL;
@@ -224,7 +239,7 @@ CREATE TABLE cards (
     id                  uuid PRIMARY KEY,
     user_id             uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     organization_id     uuid REFERENCES organizations(id) ON DELETE SET NULL,
-    kind                card_kind NOT NULL DEFAULT 'personal',
+    kind                text NOT NULL DEFAULT 'personal',
     is_default          boolean NOT NULL DEFAULT false,
 
     display_name        text NOT NULL,
@@ -249,7 +264,8 @@ CREATE TABLE cards (
 
     created_at          timestamptz NOT NULL DEFAULT now(),
     updated_at          timestamptz NOT NULL DEFAULT now(),
-    deleted_at          timestamptz
+    deleted_at          timestamptz,
+    CONSTRAINT cards_kind_check_values CHECK (kind IN ('personal', 'business', 'custom'))
 );
 CREATE UNIQUE INDEX cards_slug_idx ON cards (slug) WHERE slug IS NOT NULL AND deleted_at IS NULL;
 CREATE UNIQUE INDEX cards_one_default_idx ON cards (user_id) WHERE is_default AND deleted_at IS NULL;
@@ -260,7 +276,7 @@ CREATE INDEX cards_user_idx ON cards (user_id) WHERE deleted_at IS NULL;
 CREATE TABLE card_tokens (
     id                  uuid PRIMARY KEY,
     card_id             uuid NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
-    kind                token_kind NOT NULL,
+    kind                text NOT NULL,
     token               text NOT NULL UNIQUE,       -- secrets.token_urlsafe(16)
     -- Live tokens carry a 10-15 min TTL. Static tokens are NULL here and are
     -- killed by revoked_at instead, which is what makes a leaked badge photo
@@ -268,7 +284,8 @@ CREATE TABLE card_tokens (
     expires_at          timestamptz,
     revoked_at          timestamptz,
     created_at          timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT live_tokens_expire CHECK (kind <> 'live' OR expires_at IS NOT NULL)
+    CONSTRAINT live_tokens_expire CHECK (kind <> 'live' OR expires_at IS NOT NULL),
+    CONSTRAINT card_tokens_kind_check_values CHECK (kind IN ('live', 'static'))
 );
 CREATE INDEX card_tokens_card_idx ON card_tokens (card_id, kind) WHERE revoked_at IS NULL;
 CREATE INDEX card_tokens_expiry_idx ON card_tokens (expires_at) WHERE expires_at IS NOT NULL;
@@ -280,17 +297,30 @@ CREATE INDEX card_tokens_expiry_idx ON card_tokens (expires_at) WHERE expires_at
 
 CREATE TABLE events (
     id                  uuid PRIMARY KEY,
-    -- Nullable: solo organizers exist and must not need a shell org (ADR-0018).
-    organization_id     uuid REFERENCES organizations(id) ON DELETE SET NULL,
+    -- NOT NULL. Every event has an organizing entity; a solo organizer gets a
+    -- personal organization created for them at signup (organizations.is_personal).
+    --
+    -- This reverses the original nullable design. A nullable owner meant every
+    -- organization-scoped query needed a second branch
+    -- (`OR organization_id IS NULL AND created_by = ?`), which is a branch
+    -- someone forgets - and forgetting it is either a leak or a silently empty
+    -- result. It also made organizer billing attach to a user sometimes and an
+    -- organization other times, doubling the paths through the entitlements
+    -- resolver.
+    --
+    -- The personal organization gets its OWN independent UUIDv7, never one
+    -- derived from the user id: entitlements.subject_id is polymorphic with no
+    -- foreign key, so a shared id would make `subject_id = X` ambiguous between
+    -- user X and organization X - a silent billing bug in the one column with
+    -- no referential integrity to catch it.
+    organization_id     uuid NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     created_by          uuid NOT NULL REFERENCES users(id),
 
     name                text NOT NULL,
-    description         jsonb,                      -- Tiptap JSON, sanitized (ADR-0019)
-    banner_path         text,
     venue               text,
     code                citext NOT NULL,            -- join code
     slug                citext,                     -- public URL, primary domain
-    visibility          event_visibility NOT NULL DEFAULT 'unlisted',
+    visibility          text NOT NULL DEFAULT 'unlisted',
 
     starts_at           timestamptz NOT NULL,
     ends_at             timestamptz NOT NULL,
@@ -305,7 +335,8 @@ CREATE TABLE events (
     created_at          timestamptz NOT NULL DEFAULT now(),
     updated_at          timestamptz NOT NULL DEFAULT now(),
     deleted_at          timestamptz,
-    CONSTRAINT events_time_order CHECK (ends_at > starts_at)
+    CONSTRAINT events_time_order CHECK (ends_at > starts_at),
+    CONSTRAINT events_visibility_check_values CHECK (visibility IN ('private', 'unlisted', 'public'))
 );
 -- Partial, so a soft-deleted event does not hold its join code hostage forever.
 CREATE UNIQUE INDEX events_code_idx ON events (code) WHERE deleted_at IS NULL;
@@ -315,15 +346,40 @@ CREATE INDEX events_org_idx ON events (organization_id) WHERE deleted_at IS NULL
 CREATE INDEX events_public_idx ON events (starts_at DESC)
     WHERE visibility = 'public' AND deleted_at IS NULL;
 
+-- Presentational content, split from `events` on purpose.
+--
+-- `events` holds operational data the product owns forever: join code,
+-- timezone, visibility, attendee limits. This holds what an organizer writes,
+-- which is the part a CMS might one day own instead (ADR-0019 said not now, and
+-- this split is what makes "revisit later" cheap rather than aspirational).
+--
+-- Read through events.service.content_for(), never joined directly from a
+-- router. Storage is then an implementation detail: structured session tables
+-- or an external CMS become a resolver change, touching neither `events`, the
+-- dashboard, nor the API shape.
+--
+-- Also keeps `events` narrow. The organizer dashboard queries it constantly and
+-- should not drag JSONB blobs along for the ride.
+CREATE TABLE event_content (
+    event_id            uuid PRIMARY KEY REFERENCES events(id) ON DELETE CASCADE,
+    -- Tiptap JSON, sanitized on write AND on read. Never raw HTML (ADR-0019).
+    body                jsonb,
+    banner_path         text,
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    updated_at          timestamptz NOT NULL DEFAULT now()
+);
+
+
 -- Separate from organization_members: a scanner hired for one day must see one
 -- event and nothing else (ADR-0018).
 CREATE TABLE event_staff (
     id                  uuid PRIMARY KEY,
     event_id            uuid NOT NULL REFERENCES events(id) ON DELETE CASCADE,
     user_id             uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    role                event_staff_role NOT NULL,
+    role                text NOT NULL,
     created_at          timestamptz NOT NULL DEFAULT now(),
-    deleted_at          timestamptz
+    deleted_at          timestamptz,
+    CONSTRAINT event_staff_role_check_values CHECK (role IN ('owner', 'manager', 'scanner', 'viewer'))
 );
 CREATE UNIQUE INDEX event_staff_active_idx
     ON event_staff (event_id, user_id) WHERE deleted_at IS NULL;
@@ -409,17 +465,33 @@ CREATE TABLE connections (
     snapshot_version    smallint NOT NULL DEFAULT 1,
 
     event_id            uuid REFERENCES events(id) ON DELETE SET NULL,
-    channel             scan_channel NOT NULL,
-    state               connection_state NOT NULL DEFAULT 'confirmed',
+    channel             text NOT NULL,
+    state               text NOT NULL DEFAULT 'confirmed',
 
     -- UNUSED IN v1. Required by discovery to know which edges may contribute to
     -- mutual-connection counts (ADR-0023). Do not remove.
-    visibility          connection_visibility NOT NULL DEFAULT 'private',
+    visibility          text NOT NULL DEFAULT 'private',
 
+    -- When the meeting HAPPENED, supplied by the client.
+    --
+    -- Distinct from created_at, which is when the server learned about it. An
+    -- offline exchange can sync hours later (ADR-0016), and using created_at
+    -- for anything time-based would attribute it to the moment the wifi came
+    -- back. That would make the peak-activity chart we sell to organizers
+    -- (ADR-0012) show a spike at reconnection - worse than no chart, because it
+    -- looks plausible.
+    --
+    -- Client-supplied means device clocks, which drift and can be set
+    -- deliberately, so the service validates it against the event window before
+    -- accepting it.
+    occurred_at         timestamptz NOT NULL DEFAULT now(),
     created_at          timestamptz NOT NULL DEFAULT now(),
     deleted_at          timestamptz,
 
-    CONSTRAINT connections_ordered CHECK (user_low_id < user_high_id)
+    CONSTRAINT connections_ordered CHECK (user_low_id < user_high_id),
+    CONSTRAINT connections_channel_check_values CHECK (channel IN ('qr_live', 'qr_static', 'nfc', 'link', 'wallet')),
+    CONSTRAINT connections_state_check_values CHECK (state IN ('pending', 'confirmed', 'declined')),
+    CONSTRAINT connections_visibility_check_values CHECK (visibility IN ('private', 'discoverable'))
 );
 
 -- Two partial indexes, NOT one constraint. Postgres treats NULLs as distinct in
@@ -477,7 +549,7 @@ CREATE TABLE anonymous_scans (
     card_id             uuid NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
     token_id            uuid REFERENCES card_tokens(id) ON DELETE SET NULL,
     event_id            uuid REFERENCES events(id) ON DELETE SET NULL,
-    channel             scan_channel NOT NULL,
+    channel             text NOT NULL,
     saved_vcard         boolean NOT NULL DEFAULT false,
     added_wallet        boolean NOT NULL DEFAULT false,
     -- Optional reply form. Creates a pending exchange and an invitation to claim.
@@ -490,7 +562,8 @@ CREATE TABLE anonymous_scans (
     -- requiring a lawful basis and disclosure.
     ip_prefix           inet,
     country             text,
-    created_at          timestamptz NOT NULL DEFAULT now()
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT anonymous_scans_channel_check_values CHECK (channel IN ('qr_live', 'qr_static', 'nfc', 'link', 'wallet'))
 );
 CREATE INDEX anonymous_scans_card_idx ON anonymous_scans (card_id, created_at DESC);
 CREATE INDEX anonymous_scans_event_idx ON anonymous_scans (event_id) WHERE event_id IS NOT NULL;
@@ -503,17 +576,20 @@ CREATE INDEX anonymous_scans_event_idx ON anonymous_scans (event_id) WHERE event
 -- Raw records from each billing source. Kept for reconciliation and support.
 CREATE TABLE subscriptions (
     id                  uuid PRIMARY KEY,
-    subject_kind        subject_kind NOT NULL,
+    subject_kind        text NOT NULL,
     subject_id          uuid NOT NULL,
-    source              entitlement_source NOT NULL,
+    source              text NOT NULL,
     source_ref          text NOT NULL,              -- Apple originalTransactionId / Stripe sub id
     plan_key            text NOT NULL,
-    status              entitlement_status NOT NULL,
+    status              text NOT NULL,
     current_period_end  timestamptz,
     raw                 jsonb NOT NULL DEFAULT '{}'::jsonb,
     created_at          timestamptz NOT NULL DEFAULT now(),
     updated_at          timestamptz NOT NULL DEFAULT now(),
-    UNIQUE (source, source_ref)
+    UNIQUE (source, source_ref),
+    CONSTRAINT subscriptions_source_check_values CHECK (source IN ('apple', 'stripe', 'google', 'manual')),
+    CONSTRAINT subscriptions_status_check_values CHECK (status IN ('active', 'grace', 'expired', 'revoked')),
+    CONSTRAINT subscriptions_subject_kind_check_values CHECK (subject_kind IN ('user', 'organization'))
 );
 CREATE INDEX subscriptions_subject_idx ON subscriptions (subject_kind, subject_id);
 
@@ -522,14 +598,14 @@ CREATE INDEX subscriptions_subject_idx ON subscriptions (subject_kind, subject_i
 -- webhook handler and zero changes here.
 CREATE TABLE entitlements (
     id                  uuid PRIMARY KEY,
-    subject_kind        subject_kind NOT NULL,
+    subject_kind        text NOT NULL,
     subject_id          uuid NOT NULL,
     entitlement_key     text NOT NULL,             -- see 00-context/pricing.md
     value_int           integer,
     value_bool          boolean,
-    source              entitlement_source NOT NULL,
+    source              text NOT NULL,
     subscription_id     uuid REFERENCES subscriptions(id) ON DELETE SET NULL,
-    status              entitlement_status NOT NULL DEFAULT 'active',
+    status              text NOT NULL DEFAULT 'active',
     -- Comped pilot partners are a manual grant with an expiry, using the same
     -- mechanism as paid. No special-case code.
     expires_at          timestamptz,
@@ -539,7 +615,10 @@ CREATE TABLE entitlements (
     -- reads as "entitled to nothing" or "unlimited" depending on the caller.
     CONSTRAINT entitlements_one_value CHECK (
         (value_int IS NOT NULL)::int + (value_bool IS NOT NULL)::int = 1
-    )
+    ),
+    CONSTRAINT entitlements_source_check_values CHECK (source IN ('apple', 'stripe', 'google', 'manual')),
+    CONSTRAINT entitlements_status_check_values CHECK (status IN ('active', 'grace', 'expired', 'revoked')),
+    CONSTRAINT entitlements_subject_kind_check_values CHECK (subject_kind IN ('user', 'organization'))
 );
 -- KNOWN LIMITATION: subject_id is polymorphic (user or organization), so no
 -- foreign key can enforce it and orphaned entitlements are accepted at the
@@ -554,13 +633,14 @@ CREATE INDEX entitlements_lookup_idx ON entitlements (subject_kind, subject_id, 
 -- occasionally duplicated, so handlers must be idempotent against this table.
 CREATE TABLE billing_events (
     id                  uuid PRIMARY KEY,
-    source              entitlement_source NOT NULL,
+    source              text NOT NULL,
     external_id         text NOT NULL,
     payload             jsonb NOT NULL,
     processed_at        timestamptz,
     error               text,
     received_at         timestamptz NOT NULL DEFAULT now(),
-    UNIQUE (source, external_id)
+    UNIQUE (source, external_id),
+    CONSTRAINT billing_events_source_check_values CHECK (source IN ('apple', 'stripe', 'google', 'manual'))
 );
 CREATE INDEX billing_events_unprocessed_idx ON billing_events (received_at)
     WHERE processed_at IS NULL;
@@ -587,10 +667,11 @@ CREATE TABLE reports (
     subject_label       text,
     reason              text NOT NULL,
     detail              text,
-    status              report_status NOT NULL DEFAULT 'open',
+    status              text NOT NULL DEFAULT 'open',
     resolved_at         timestamptz,
     resolution_note     text,
-    created_at          timestamptz NOT NULL DEFAULT now()
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT reports_status_check_values CHECK (status IN ('open', 'actioned', 'dismissed'))
 );
 CREATE INDEX reports_open_idx ON reports (created_at) WHERE status = 'open';
 
@@ -677,6 +758,8 @@ CREATE TRIGGER cards_updated_at BEFORE UPDATE ON cards
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 CREATE TRIGGER events_updated_at BEFORE UPDATE ON events
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER event_content_updated_at BEFORE UPDATE ON event_content
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 CREATE TRIGGER connection_views_updated_at BEFORE UPDATE ON connection_views
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 CREATE TRIGGER subscriptions_updated_at BEFORE UPDATE ON subscriptions
@@ -703,6 +786,7 @@ TABLES = [
     "event_export_consents",
     "event_attendees",
     "event_staff",
+    "event_content",
     "events",
     "card_tokens",
     "cards",
@@ -714,20 +798,7 @@ TABLES = [
     "users",
 ]
 
-TYPES = [
-    "card_kind",
-    "token_kind",
-    "scan_channel",
-    "connection_state",
-    "connection_visibility",
-    "event_visibility",
-    "org_role",
-    "event_staff_role",
-    "entitlement_source",
-    "entitlement_status",
-    "subject_kind",
-    "report_status",
-]
+TYPES: list[str] = []  # ADR-0027: no native enum types
 
 
 def upgrade() -> None:

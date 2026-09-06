@@ -16,30 +16,30 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from acme.core.db import Base, CIText, pg_enum
+from acme.core.db import Base, CIText, constrained
 from acme.core.ids import new_id
+from acme.domains.events.enums import EventStaffRole, EventVisibility
 
 
 class Event(Base):
     __tablename__ = "events"
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=new_id)
-    # Nullable: solo organizers exist and must not need a shell org (ADR-0018).
-    organization_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("organizations.id", ondelete="SET NULL")
+    # NOT NULL. Every event has an organizing entity; a solo organizer gets a
+    # personal organization at signup (ADR-0027). A nullable owner meant every
+    # organization-scoped query carried a second branch, and forgetting it is
+    # either a leak or a silently empty result.
+    organization_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE")
     )
     created_by: Mapped[UUID] = mapped_column(ForeignKey("users.id"))
 
     name: Mapped[str] = mapped_column(Text)
-    # Tiptap JSON, sanitized on write AND on read. Never raw HTML: user HTML on
-    # the public domain is the highest-consequence vulnerability here (ADR-0019).
-    description: Mapped[dict[str, object] | None] = mapped_column(JSONB)
-    banner_path: Mapped[str | None] = mapped_column(Text)
     venue: Mapped[str | None] = mapped_column(Text)
     code: Mapped[str] = mapped_column(CIText())
     slug: Mapped[str | None] = mapped_column(CIText())
-    visibility: Mapped[str] = mapped_column(
-        pg_enum("event_visibility"), server_default=text("'unlisted'")
+    visibility: Mapped[EventVisibility] = mapped_column(
+        constrained(EventVisibility), server_default=text("'unlisted'")
     )
 
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -85,6 +85,36 @@ class Event(Base):
     )
 
 
+class EventContent(Base):
+    """Presentational content, split from Event on purpose.
+
+    `events` holds operational data the product owns forever: join code,
+    timezone, visibility, limits. This holds what an organizer writes, which is
+    the part a CMS might one day own instead (ADR-0019 said not now; this split
+    is what makes "revisit later" cheap rather than aspirational).
+
+    Read through EventsService.content_for(), never joined from a router.
+    Storage is then an implementation detail: structured session tables or an
+    external CMS become a resolver change, touching neither `events`, the
+    dashboard, nor the API shape.
+
+    Also keeps `events` narrow - the organizer dashboard queries it constantly
+    and should not drag JSONB blobs along.
+    """
+
+    __tablename__ = "event_content"
+
+    event_id: Mapped[UUID] = mapped_column(
+        ForeignKey("events.id", ondelete="CASCADE"), primary_key=True
+    )
+    # Tiptap JSON, sanitized on write AND on read. Never raw HTML: user HTML on
+    # the public domain is the highest-consequence vulnerability here.
+    body: Mapped[dict[str, object] | None] = mapped_column(JSONB)
+    banner_path: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class EventStaff(Base):
     """Separate from organization membership (ADR-0018).
 
@@ -98,7 +128,7 @@ class EventStaff(Base):
     id: Mapped[UUID] = mapped_column(primary_key=True, default=new_id)
     event_id: Mapped[UUID] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"))
     user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    role: Mapped[str] = mapped_column(pg_enum("event_staff_role"))
+    role: Mapped[EventStaffRole] = mapped_column(constrained(EventStaffRole))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -225,6 +255,7 @@ class EventRosterEntry(Base):
 __all__ = [
     "Event",
     "EventAttendee",
+    "EventContent",
     "EventExportConsent",
     "EventRosterEntry",
     "EventStaff",

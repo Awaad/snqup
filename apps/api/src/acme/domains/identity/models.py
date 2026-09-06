@@ -20,8 +20,9 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from acme.core.db import Base, CIText, pg_enum
+from acme.core.db import Base, CIText, constrained
 from acme.core.ids import new_id
+from acme.domains.identity.enums import OrgRole
 
 
 class User(Base):
@@ -101,7 +102,20 @@ class Organization(Base):
     id: Mapped[UUID] = mapped_column(primary_key=True, default=new_id)
     name: Mapped[str] = mapped_column(Text)
     slug: Mapped[str] = mapped_column(CIText())
+    # Functional, so columns rather than keys in `brand`: website seeds
+    # domain_verifications, which gates public indexed event pages and the
+    # verified badge. Anything queried or acted on gets a column; `brand` is
+    # presentation only, or it becomes a junk drawer nobody can query.
+    website: Mapped[str | None] = mapped_column(Text)
+    description: Mapped[str | None] = mapped_column(Text)
+    logo_path: Mapped[str | None] = mapped_column(Text)
     brand: Mapped[dict[str, object]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    # A solo organizer's personal organization, created at organizer signup so
+    # events.organization_id can be NOT NULL. Its id is an independent UUIDv7,
+    # never derived from the user id: entitlements.subject_id is polymorphic
+    # with no FK, so a shared id would make an entitlement ambiguous between
+    # user X and organization X (ADR-0027).
+    is_personal: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -131,7 +145,7 @@ class OrganizationMember(Base):
         ForeignKey("organizations.id", ondelete="CASCADE")
     )
     user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    role: Mapped[str] = mapped_column(pg_enum("org_role"))
+    role: Mapped[OrgRole] = mapped_column(constrained(OrgRole))
     invited_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

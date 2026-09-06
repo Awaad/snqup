@@ -15,6 +15,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    SmallInteger,
     Text,
     UniqueConstraint,
     func,
@@ -23,8 +24,9 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import INET, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from acme.core.db import Base, CIText, pg_enum
+from acme.core.db import Base, CIText, constrained
 from acme.core.ids import new_id
+from acme.domains.connections.enums import ConnectionState, ConnectionVisibility, ScanChannel
 
 
 class Connection(Base):
@@ -66,22 +68,35 @@ class Connection(Base):
     # "Recruiter at Competitor" and retroactively change what everyone received.
     card_low_snapshot: Mapped[dict[str, object]] = mapped_column(JSONB)
     card_high_snapshot: Mapped[dict[str, object]] = mapped_column(JSONB)
-    snapshot_version: Mapped[int] = mapped_column(server_default=text("1"))
+    snapshot_version: Mapped[int] = mapped_column(SmallInteger, server_default=text("1"))
 
     event_id: Mapped[UUID | None] = mapped_column(ForeignKey("events.id", ondelete="SET NULL"))
     # Recorded from v1. Retrofitting loses channel attribution history, which
     # is how we learn whether NFC or QR actually gets used.
-    channel: Mapped[str] = mapped_column(pg_enum("scan_channel"))
-    state: Mapped[str] = mapped_column(
-        pg_enum("connection_state"), server_default=text("'confirmed'")
+    channel: Mapped[ScanChannel] = mapped_column(constrained(ScanChannel))
+    state: Mapped[ConnectionState] = mapped_column(
+        constrained(ConnectionState), server_default=text("'confirmed'")
     )
 
     # UNUSED IN v1. Discovery needs to know which edges may contribute to
     # mutual-connection counts (ADR-0023). Do not remove as dead code.
-    visibility: Mapped[str] = mapped_column(
-        pg_enum("connection_visibility"), server_default=text("'private'")
+    visibility: Mapped[ConnectionVisibility] = mapped_column(
+        constrained(ConnectionVisibility), server_default=text("'private'")
     )
 
+    # When the meeting HAPPENED, supplied by the client. Distinct from
+    # created_at, which is when the server learned about it.
+    #
+    # An offline exchange can sync hours later (ADR-0016). Keying time-based
+    # analytics on created_at would attribute it to the moment the wifi came
+    # back, making the peak-activity chart we sell organizers (ADR-0012) spike
+    # at reconnection - worse than no chart, because it looks plausible.
+    #
+    # Client-supplied means device clocks, which drift and can be set
+    # deliberately, so the service validates it against the event window.
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -189,7 +204,7 @@ class AnonymousScan(Base):
     card_id: Mapped[UUID] = mapped_column(ForeignKey("cards.id", ondelete="CASCADE"))
     token_id: Mapped[UUID | None] = mapped_column(ForeignKey("card_tokens.id", ondelete="SET NULL"))
     event_id: Mapped[UUID | None] = mapped_column(ForeignKey("events.id", ondelete="SET NULL"))
-    channel: Mapped[str] = mapped_column(pg_enum("scan_channel"))
+    channel: Mapped[ScanChannel] = mapped_column(constrained(ScanChannel))
     saved_vcard: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     added_wallet: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
 

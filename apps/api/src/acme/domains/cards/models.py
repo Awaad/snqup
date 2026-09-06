@@ -17,8 +17,9 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from acme.core.db import Base, CIText, pg_enum
+from acme.core.db import Base, CIText, constrained
 from acme.core.ids import new_id
+from acme.domains.cards.enums import CardKind, TokenKind
 
 
 class Card(Base):
@@ -31,7 +32,7 @@ class Card(Base):
     organization_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("organizations.id", ondelete="SET NULL")
     )
-    kind: Mapped[str] = mapped_column(pg_enum("card_kind"), server_default=text("'personal'"))
+    kind: Mapped[str] = mapped_column(constrained(CardKind), server_default=text("'personal'"))
     is_default: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
 
     display_name: Mapped[str] = mapped_column(Text)
@@ -106,7 +107,7 @@ class CardToken(Base):
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=new_id)
     card_id: Mapped[UUID] = mapped_column(ForeignKey("cards.id", ondelete="CASCADE"))
-    kind: Mapped[str] = mapped_column(pg_enum("token_kind"))
+    kind: Mapped[TokenKind] = mapped_column(constrained(TokenKind))
     token: Mapped[str] = mapped_column(Text, unique=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

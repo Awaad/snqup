@@ -15,7 +15,6 @@ from collections.abc import AsyncIterator
 from enum import Enum
 from typing import Any
 
-from sqlalchemy import Enum as SAEnum
 from sqlalchemy import types
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -41,32 +40,53 @@ class CIText(types.UserDefinedType[str]):
         return "CITEXT"
 
 
-def constrained[E: Enum](python_enum: type[E]) -> SAEnum:
+class ConstrainedText[E: Enum](types.TypeDecorator[E]):
+    """A `text` column whose values are a Python enum.
+
+    NOT sqlalchemy.Enum(native_enum=False). That renders as VARCHAR, and
+    against a TEXT column `alembic revision --autogenerate` reports a type
+    change for EVERY constrained column - eighteen spurious alter_column
+    entries per run. People then learn to skim autogenerate output, and a real
+    change hides in the noise. That is the exact failure the model/database
+    drift test exists to prevent, so the models must not create it.
+
+    impl is Text, so the model type matches the database type exactly and
+    autogenerate sees nothing. The enum conversion happens in Python, and the
+    permitted set is enforced by a CHECK constraint the migration owns
+    (ADR-0027).
+    """
+
+    impl = types.Text
+    cache_ok = True
+
+    def __init__(self, python_enum: type[E]) -> None:
+        self.python_enum = python_enum
+        super().__init__()
+
+    def process_bind_param(self, value: E | str | None, dialect: object) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, self.python_enum):
+            return str(value.value)
+        # Accept a raw string, but only one the enum actually permits, so a
+        # typo fails here rather than at the CHECK constraint.
+        return str(self.python_enum(value).value)
+
+    def process_result_value(self, value: str | None, dialect: object) -> E | None:
+        if value is None:
+            return None
+        return self.python_enum(value)
+
+
+def constrained[E: Enum](python_enum: type[E]) -> ConstrainedText[E]:
     """Map a Python enum onto a `text` column with a CHECK constraint.
 
-    native_enum=False so SQLAlchemy treats the column as text rather than
-    expecting a Postgres enum type. create_constraint=False because the
-    migration owns the schema - the CHECK already exists and model metadata
-    must not try to add a second one.
-
-    length=None keeps it TEXT rather than VARCHAR(n). SQLAlchemy would
-    otherwise size the column to the longest CURRENT value, so adding a longer
-    value later would need an ALTER COLUMN TYPE - the exact friction we moved
-    off Postgres enums to avoid.
-
-    values_callable makes the VALUES travel, not the member NAMES. Without it
-    SQLAlchemy sends `PERSONAL` where the constraint expects `personal`.
-
-    tests/test_enum_sync.py compares these against the database CHECK
-    constraints in both directions.
+    The StrEnum is now the ONLY place in code where the permitted set is
+    written down: the database has no named type carrying them, just a list of
+    literals inside a constraint. tests/test_enum_sync.py compares the two in
+    both directions.
     """
-    return SAEnum(
-        python_enum,
-        native_enum=False,
-        create_constraint=False,
-        length=None,
-        values_callable=lambda e: [m.value for m in e],
-    )
+    return ConstrainedText(python_enum)
 
 
 class Base(DeclarativeBase):

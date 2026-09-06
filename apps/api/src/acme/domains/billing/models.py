@@ -23,8 +23,9 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from acme.core.db import Base, pg_enum
+from acme.core.db import Base, constrained
 from acme.core.ids import new_id
+from acme.domains.billing.enums import EntitlementSource, EntitlementStatus, SubjectKind
 
 
 class Subscription(Base):
@@ -36,7 +37,7 @@ class Subscription(Base):
     __tablename__ = "subscriptions"
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=new_id)
-    subject_kind: Mapped[str] = mapped_column(pg_enum("subject_kind"))
+    subject_kind: Mapped[SubjectKind] = mapped_column(constrained(SubjectKind))
     # KNOWN LIMITATION: polymorphic (user or organization), so no FK is
     # possible and orphans are accepted at the database level. A `principals`
     # supertype table would fix it and was rejected: an orphan is a dead row
@@ -44,11 +45,11 @@ class Subscription(Base):
     # See schema/review-2026-09-05.md. Integrity here is the service layer's
     # job, and the reconciliation job must detect orphans.
     subject_id: Mapped[UUID] = mapped_column()
-    source: Mapped[str] = mapped_column(pg_enum("entitlement_source"))
+    source: Mapped[EntitlementSource] = mapped_column(constrained(EntitlementSource))
     # Apple originalTransactionId / Stripe subscription id.
     source_ref: Mapped[str] = mapped_column(Text)
     plan_key: Mapped[str] = mapped_column(Text)
-    status: Mapped[str] = mapped_column(pg_enum("entitlement_status"))
+    status: Mapped[EntitlementStatus] = mapped_column(constrained(EntitlementStatus))
     current_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     raw: Mapped[dict[str, object]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -78,17 +79,17 @@ class Entitlement(Base):
     __tablename__ = "entitlements"
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=new_id)
-    subject_kind: Mapped[str] = mapped_column(pg_enum("subject_kind"))
+    subject_kind: Mapped[SubjectKind] = mapped_column(constrained(SubjectKind))
     subject_id: Mapped[UUID] = mapped_column()  # polymorphic, see Subscription
     entitlement_key: Mapped[str] = mapped_column(Text)
     value_int: Mapped[int | None] = mapped_column(Integer)
     value_bool: Mapped[bool | None] = mapped_column(Boolean)
-    source: Mapped[str] = mapped_column(pg_enum("entitlement_source"))
+    source: Mapped[EntitlementSource] = mapped_column(constrained(EntitlementSource))
     subscription_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("subscriptions.id", ondelete="SET NULL")
     )
-    status: Mapped[str] = mapped_column(
-        pg_enum("entitlement_status"), server_default=text("'active'")
+    status: Mapped[EntitlementStatus] = mapped_column(
+        constrained(EntitlementStatus), server_default=text("'active'")
     )
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -134,7 +135,7 @@ class BillingEvent(Base):
     __tablename__ = "billing_events"
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=new_id)
-    source: Mapped[str] = mapped_column(pg_enum("entitlement_source"))
+    source: Mapped[EntitlementSource] = mapped_column(constrained(EntitlementSource))
     external_id: Mapped[str] = mapped_column(Text)
     payload: Mapped[dict[str, object]] = mapped_column(JSONB)
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

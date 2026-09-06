@@ -15,8 +15,9 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from acme.core.db import Base, pg_enum
+from acme.core.db import Base, constrained
 from acme.core.ids import new_id
+from acme.domains.safety.enums import ReportStatus
 
 
 class Report(Base):
@@ -48,7 +49,7 @@ class Report(Base):
     subject_label: Mapped[str | None] = mapped_column(Text)
     reason: Mapped[str] = mapped_column(Text)
     detail: Mapped[str | None] = mapped_column(Text)
-    status: Mapped[str] = mapped_column(pg_enum("report_status"), server_default=text("'open'"))
+    status: Mapped[str] = mapped_column(constrained(ReportStatus), server_default=text("'open'"))
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     resolution_note: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
