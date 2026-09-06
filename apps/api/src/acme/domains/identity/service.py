@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from acme.core.errors import ApiError
 from acme.core.ids import new_id
-from acme.domains.identity.models import User, UserProfile
+from acme.domains.identity.models import ReservedSlug, User, UserProfile
 from acme.domains.identity.repository import UserRepository
 
 
@@ -31,6 +31,16 @@ class IdentityService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         self._users = UserRepository(session)
+
+    async def is_slug_reserved(self, slug: str) -> bool:
+        """Route collisions, brand squatting, profanity.
+
+        Exposed as a service method because `reserved_slugs` belongs to this
+        domain and other domains may import only `service` (ADR-0025). Cards
+        reaching into ReservedSlug directly is exactly the coupling the import
+        contract exists to catch - and it did.
+        """
+        return await self._session.get(ReservedSlug, slug) is not None
 
     async def current_user(self, auth_subject: str) -> CurrentUser:
         """Map a verified JWT subject to our user.
