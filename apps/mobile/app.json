@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "acme",
+    "slug": "acme",
+    "scheme": "acme",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "extra": {
+      "_comment": "Bundle IDs are placeholders. Do NOT create App Store Connect or Play Console records until the name is final - those are the identifiers that cannot be renamed (00-context/naming.md)."
+    },
+    "ios": {
+      "bundleIdentifier": "com.acme.app",
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Scan a code to exchange contact details.",
+        "NFCReaderUsageDescription": "Tap a card to exchange contact details."
+      }
+    },
+    "android": {
+      "package": "com.acme.app",
+      "permissions": ["CAMERA", "NFC"]
+    },
+    "plugins": [
+      "expo-router",
+      "expo-localization",
+      "expo-secure-store",
+      ["expo-camera", { "cameraPermission": "Scan a code to exchange contact details." }]
+    ],
+    "experiments": { "typedRoutes": true }
+  }
+}

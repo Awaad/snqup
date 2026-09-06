@@ -1,0 +1,39 @@
+{
+  "name": "@acme/mobile",
+  "version": "0.0.0",
+  "private": true,
+  "main": "expo-router/entry",
+  "scripts": {
+    "start": "expo start --dev-client",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e": "maestro test .maestro/"
+  },
+  "dependencies": {
+    "@acme/api-client": "workspace:*",
+    "@acme/shared": "workspace:*",
+    "@acme/tokens": "workspace:*",
+    "@tanstack/react-query": "catalog:",
+    "drizzle-orm": "0.45.2",
+    "expo": "57.0.20",
+    "expo-camera": "57.0.4",
+    "expo-localization": "57.0.1",
+    "expo-notifications": "57.0.17",
+    "expo-router": "57.0.19",
+    "expo-secure-store": "57.0.3",
+    "expo-sqlite": "57.0.2",
+    "i18next": "catalog:",
+    "react": "catalog:",
+    "react-i18next": "catalog:",
+    "react-native": "0.87.1",
+    "zustand": "catalog:"
+  },
+  "devDependencies": {
+    "@types/react": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}
