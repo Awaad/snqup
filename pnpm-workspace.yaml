@@ -2,6 +2,24 @@ packages:
   - "apps/*"
   - "packages/*"
 
+
+# Remove when expo-modules-core widens its range.
+peerDependencyRules:
+  allowedVersions:
+    "expo-modules-core>react-native-worklets": "0.12"
+
+allowBuilds:
+  # Native file watcher; the JS fallback is markedly slower.
+  '@parcel/watcher': true
+  # Downloads the binary that uploads source maps. Without it, native crash
+  # reports in Sentry are unreadable stack traces.
+  '@sentry/cli': true
+  # Native transform binary.
+  '@swc/core': true
+  # DENIED. Its postinstall only prints a funding message; nothing functional
+  # depends on it running.
+  core-js: false
+
 # Versions are pinned exactly across the workspace (ADR-0021).
 # A catalog makes a bump a one-line change instead of a search-and-replace.
 catalog:
@@ -32,3 +50,25 @@ catalog:
   tailwindcss: 4.3.3
   openapi-typescript: 7.13.0
   style-dictionary: 5.5.2
+
+
+# openapi-typescript is a BUILD TOOL, and it cannot run on TypeScript 7.
+#
+# Its `typescript: ^5.x` peer range is accurate, not stale. TS 7 is the
+# compiler rewritten in Go and does not expose the same API surface:
+#
+#     TypeError: Cannot read properties of undefined
+#     (reading 'createKeywordTypeNode')
+#
+# ts.factory is gone. Overriding the peer range does not help - it silences the
+# warning and the tool still crashes at runtime.
+#
+# So the codegen package runs its own TypeScript. This is not a split type
+# system: openapi-typescript merely needs a TS 5 runtime to execute, and what
+# it emits is plain TypeScript source that TS 7 then typechecks like any other
+# file. Application code stays on 7.
+#
+# Collapse this back into the main catalog when openapi-typescript supports 7.
+catalogs:
+  codegen:
+    typescript: 5.9.3

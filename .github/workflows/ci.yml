@@ -47,6 +47,14 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # `pnpm install` only WARNS on peer conflicts and on undecided build
+      # scripts. Both are how a broken toolchain reaches main looking green:
+      # the openapi-typescript / TypeScript 7 incompatibility showed up as a
+      # warning for days before anything actually failed.
+      - name: Peer dependencies must be satisfied
+        if: matrix.task == 'lint'
+        run: pnpm peers check
+
       - name: Run ${{ matrix.task }}
         run: pnpm ${{ matrix.task }}
 
