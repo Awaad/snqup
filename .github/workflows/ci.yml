@@ -95,9 +95,14 @@ jobs:
     runs-on: ubuntu-24.04
     services:
       postgres:
+        # pgvector image, not plain postgres. The baseline enables the vector
+        # extension (unused in v1, present so ADR-0023 discovery needs no
+        # migration), and CREATE EXTENSION fails outright when it is not
+        # available - IF NOT EXISTS does not help. Supabase ships it in prod.
+        #
         # Real Postgres, not SQLite. Partial indexes, citext, JSONB operators
         # and LISTEN/NOTIFY are all load-bearing and none work on SQLite.
-        image: postgres:17-alpine
+        image: pgvector/pgvector:pg17
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: acme_test
@@ -166,8 +171,18 @@ jobs:
         working-directory: apps/api
         run: uv sync --frozen
 
+      # Settings have no defaults: a missing secret must fail loudly at startup
+      # rather than silently falling back to something that works in dev
+      # (ADR-0013). Building the app to emit its schema therefore needs values,
+      # so supply placeholders. None of them are connected to.
       - name: Export OpenAPI schema
         working-directory: apps/api
+        env:
+          DATABASE_URL: postgresql+asyncpg://localhost/schema_export
+          DATABASE_LISTEN_URL: postgresql+asyncpg://localhost/schema_export
+          REDIS_URL: redis://localhost:6379/0
+          JWT_ISSUER: https://schema-export.invalid
+          JWT_AUDIENCE: schema-export
         run: uv run python -m acme.scripts.export_openapi > ../../packages/api-client/openapi.json
 
       - name: Regenerate
@@ -203,6 +218,12 @@ jobs:
       - name: Placeholder check
         run: ./scripts/check-placeholder.sh
 
+      # The baseline embeds its DDL verbatim so the revision is immutable.
+      # This catches the case where schema.sql is edited and the migration is
+      # not, which would leave the reference document silently lying.
+      - name: Baseline migration matches schema.sql
+        run: ./scripts/check-schema-sync.sh
+
       - name: No hardcoded prices
         run: ./scripts/check-no-prices.sh
 
@@ -220,7 +241,7 @@ jobs:
     runs-on: ubuntu-24.04
     services:
       postgres:
-        image: postgres:17-alpine
+        image: pgvector/pgvector:pg17
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: acme_migrations
