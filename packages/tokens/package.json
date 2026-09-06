@@ -1,0 +1,21 @@
+{
+  "name": "@acme/tokens",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./tailwind": "./dist/tailwind.js",
+    "./native": "./dist/native.js",
+    "./css": "./dist/tokens.css"
+  },
+  "scripts": {
+    "generate": "style-dictionary build --config config.json",
+    "build": "pnpm generate",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "style-dictionary": "catalog:",
+    "typescript": "catalog:"
+  }
+}
