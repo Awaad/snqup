@@ -122,6 +122,12 @@ CREATE TABLE organizations (
     updated_at          timestamptz NOT NULL DEFAULT now(),
     deleted_at          timestamptz
 );
+-- Partial, so a soft-deleted organization does not hold its slug forever.
+-- NOTE: organizations.slug lost its UNIQUE when this index was introduced and
+-- the index itself failed to land, leaving no uniqueness at all for a while.
+-- Caught by tests/test_model_schema_sync.py, not by review.
+CREATE UNIQUE INDEX organizations_slug_idx ON organizations (slug)
+    WHERE deleted_at IS NULL;
 
 -- Surrogate PK, not (organization_id, user_id). With a natural PK, a member who
 -- leaves and is later re-invited collides with their own soft-deleted row and
@@ -659,6 +665,13 @@ CREATE TRIGGER entitlements_updated_at BEFORE UPDATE ON entitlements
 --
 -- 3. events.code, events.slug and organizations.slug were plain UNIQUE, so a
 --    soft-deleted event held its join code forever. Now partial.
+--
+-- 10. FOLLOW-UP TO 3, found later by tests/test_model_schema_sync.py: the
+--    organizations.slug replacement dropped the UNIQUE but the partial index
+--    that was meant to replace it never landed, so for a while two
+--    organizations could claim the same public slug and nothing complained.
+--    A schema edit that silently does half of what was intended is exactly
+--    what the model/database drift test is for.
 --
 -- 4. users.email was plain UNIQUE, so a deleted account blocked re-registration
 --    for the whole 30-day grace period. Resolved by the users/user_profiles
