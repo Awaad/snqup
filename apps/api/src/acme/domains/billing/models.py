@@ -24,6 +24,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from acme.core.db import Base, pg_enum
+from acme.core.ids import new_id
 
 
 class Subscription(Base):
@@ -34,7 +35,7 @@ class Subscription(Base):
 
     __tablename__ = "subscriptions"
 
-    id: Mapped[UUID] = mapped_column(primary_key=True)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=new_id)
     subject_kind: Mapped[str] = mapped_column(pg_enum("subject_kind"))
     # KNOWN LIMITATION: polymorphic (user or organization), so no FK is
     # possible and orphans are accepted at the database level. A `principals`
@@ -76,7 +77,7 @@ class Entitlement(Base):
 
     __tablename__ = "entitlements"
 
-    id: Mapped[UUID] = mapped_column(primary_key=True)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=new_id)
     subject_kind: Mapped[str] = mapped_column(pg_enum("subject_kind"))
     subject_id: Mapped[UUID] = mapped_column()  # polymorphic, see Subscription
     entitlement_key: Mapped[str] = mapped_column(Text)
@@ -132,7 +133,7 @@ class BillingEvent(Base):
 
     __tablename__ = "billing_events"
 
-    id: Mapped[UUID] = mapped_column(primary_key=True)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=new_id)
     source: Mapped[str] = mapped_column(pg_enum("entitlement_source"))
     external_id: Mapped[str] = mapped_column(Text)
     payload: Mapped[dict[str, object]] = mapped_column(JSONB)

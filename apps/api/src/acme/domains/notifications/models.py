@@ -8,12 +8,13 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from acme.core.db import Base
+from acme.core.ids import new_id
 
 
 class DeviceToken(Base):
     __tablename__ = "device_tokens"
 
-    id: Mapped[UUID] = mapped_column(primary_key=True)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=new_id)
     user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     expo_token: Mapped[str] = mapped_column(Text)
     platform: Mapped[str] = mapped_column(Text)
@@ -47,7 +48,7 @@ class Notification(Base):
 
     __tablename__ = "notifications"
 
-    id: Mapped[UUID] = mapped_column(primary_key=True)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=new_id)
     user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     kind: Mapped[str] = mapped_column(Text)
     payload: Mapped[dict[str, object]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))

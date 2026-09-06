@@ -17,12 +17,13 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from acme.core.db import Base, CIText, pg_enum
+from acme.core.ids import new_id
 
 
 class Event(Base):
     __tablename__ = "events"
 
-    id: Mapped[UUID] = mapped_column(primary_key=True)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=new_id)
     # Nullable: solo organizers exist and must not need a shell org (ADR-0018).
     organization_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("organizations.id", ondelete="SET NULL")
@@ -94,7 +95,7 @@ class EventStaff(Base):
 
     __tablename__ = "event_staff"
 
-    id: Mapped[UUID] = mapped_column(primary_key=True)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=new_id)
     event_id: Mapped[UUID] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"))
     user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     role: Mapped[str] = mapped_column(pg_enum("event_staff_role"))
@@ -121,7 +122,7 @@ class EventAttendee(Base):
 
     __tablename__ = "event_attendees"
 
-    id: Mapped[UUID] = mapped_column(primary_key=True)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=new_id)
     event_id: Mapped[UUID] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"))
     user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     card_id: Mapped[UUID | None] = mapped_column(ForeignKey("cards.id", ondelete="SET NULL"))
@@ -166,7 +167,7 @@ class EventExportConsent(Base):
 
     __tablename__ = "event_export_consents"
 
-    id: Mapped[UUID] = mapped_column(primary_key=True)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=new_id)
     event_id: Mapped[UUID] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"))
     user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     scope: Mapped[str] = mapped_column(Text)
@@ -200,7 +201,7 @@ class EventRosterEntry(Base):
 
     __tablename__ = "event_roster_entries"
 
-    id: Mapped[UUID] = mapped_column(primary_key=True)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=new_id)
     event_id: Mapped[UUID] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"))
     email: Mapped[str | None] = mapped_column(CIText())
     display_name: Mapped[str | None] = mapped_column(Text)

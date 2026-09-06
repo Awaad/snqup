@@ -5,6 +5,8 @@
 root_package = acme
 include_external_packages = True
 
+# NOTE: exchange has no repository or models. It owns no tables and
+# orchestrates other domains' services instead, so there is nothing to forbid.
 [importlinter:contract:1]
 name = Domains may not import each other's internals
 type = forbidden
@@ -19,14 +21,12 @@ source_modules =
 forbidden_modules =
     acme.domains.identity.repository
     acme.domains.cards.repository
-    acme.domains.exchange.repository
     acme.domains.connections.repository
     acme.domains.events.repository
     acme.domains.billing.repository
     acme.domains.safety.repository
     acme.domains.identity.models
     acme.domains.cards.models
-    acme.domains.exchange.models
     acme.domains.connections.models
     acme.domains.events.models
     acme.domains.billing.models

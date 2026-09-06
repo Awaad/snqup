@@ -21,6 +21,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from acme.core.db import Base, CIText, pg_enum
+from acme.core.ids import new_id
 
 
 class User(Base):
@@ -41,7 +42,7 @@ class User(Base):
 
     __tablename__ = "users"
 
-    id: Mapped[UUID] = mapped_column(primary_key=True)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=new_id)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     purge_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -97,7 +98,7 @@ class UserProfile(Base):
 class Organization(Base):
     __tablename__ = "organizations"
 
-    id: Mapped[UUID] = mapped_column(primary_key=True)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=new_id)
     name: Mapped[str] = mapped_column(Text)
     slug: Mapped[str] = mapped_column(CIText())
     brand: Mapped[dict[str, object]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
@@ -125,7 +126,7 @@ class OrganizationMember(Base):
 
     __tablename__ = "organization_members"
 
-    id: Mapped[UUID] = mapped_column(primary_key=True)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=new_id)
     organization_id: Mapped[UUID] = mapped_column(
         ForeignKey("organizations.id", ondelete="CASCADE")
     )
@@ -161,7 +162,7 @@ class DomainVerification(Base):
 
     __tablename__ = "domain_verifications"
 
-    id: Mapped[UUID] = mapped_column(primary_key=True)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=new_id)
     organization_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("organizations.id", ondelete="CASCADE")
     )

@@ -24,6 +24,7 @@ from sqlalchemy.dialects.postgresql import INET, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from acme.core.db import Base, CIText, pg_enum
+from acme.core.ids import new_id
 
 
 class Connection(Base):
@@ -49,7 +50,7 @@ class Connection(Base):
 
     __tablename__ = "connections"
 
-    id: Mapped[UUID] = mapped_column(primary_key=True)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=new_id)
 
     # RESTRICT, not CASCADE. The identity anchor must survive as long as any
     # connection references it: erasing A must not destroy B's record of the
@@ -123,7 +124,7 @@ class ConnectionView(Base):
 
     __tablename__ = "connection_views"
 
-    id: Mapped[UUID] = mapped_column(primary_key=True)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=new_id)
     connection_id: Mapped[UUID] = mapped_column(ForeignKey("connections.id", ondelete="CASCADE"))
     user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
 
@@ -184,7 +185,7 @@ class AnonymousScan(Base):
 
     __tablename__ = "anonymous_scans"
 
-    id: Mapped[UUID] = mapped_column(primary_key=True)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=new_id)
     card_id: Mapped[UUID] = mapped_column(ForeignKey("cards.id", ondelete="CASCADE"))
     token_id: Mapped[UUID | None] = mapped_column(ForeignKey("card_tokens.id", ondelete="SET NULL"))
     event_id: Mapped[UUID | None] = mapped_column(ForeignKey("events.id", ondelete="SET NULL"))

@@ -18,12 +18,13 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from acme.core.db import Base, CIText, pg_enum
+from acme.core.ids import new_id
 
 
 class Card(Base):
     __tablename__ = "cards"
 
-    id: Mapped[UUID] = mapped_column(primary_key=True)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=new_id)
     # Declared by table name string, never by importing identity.models.
     # A string carries no import, so the domain boundary holds (ADR-0025).
     user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
@@ -103,7 +104,7 @@ class CardToken(Base):
 
     __tablename__ = "card_tokens"
 
-    id: Mapped[UUID] = mapped_column(primary_key=True)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=new_id)
     card_id: Mapped[UUID] = mapped_column(ForeignKey("cards.id", ondelete="CASCADE"))
     kind: Mapped[str] = mapped_column(pg_enum("token_kind"))
     token: Mapped[str] = mapped_column(Text, unique=True)
