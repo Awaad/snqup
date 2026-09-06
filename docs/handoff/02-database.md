@@ -9,10 +9,19 @@ rules here are easy to violate under time pressure.
 ## Running it locally
 
 ```bash
+cp .env.example .env            # DATABASE_URL lives here
 docker compose up -d --wait     # pgvector/pgvector:pg17 + Valkey
 pnpm api:migrate                # alembic upgrade head
 pnpm api:test
 ```
+
+Alembic and pytest resolve the database through the **same** narrow settings model
+(`acme.core.config.DatabaseSettings`): environment first, then `.env`. Neither has a
+fallback, so they cannot disagree about which database they mean and a missing variable
+says so instead of pointing at one that does not exist.
+
+Set `TEST_DATABASE_URL` to run the suite against a separate database. Leaving it unset is
+fine: every fixture runs in a transaction that is rolled back.
 
 The image is **`pgvector/pgvector:pg17`**, not plain `postgres`. The baseline enables the
 `vector` extension, and `CREATE EXTENSION` fails outright when it is unavailable —
@@ -70,7 +79,7 @@ It has already earned its place: it caught `organizations.slug` having no unique
 all, because a schema edit silently applied half of what was intended (finding 10 in
 `schema/review-2026-09-05.md`).
 
-`core/registry.py` imports every models module so `Base.metadata` is complete. Without
+`registry.py` imports every models module so `Base.metadata` is complete. Without
 it, the drift test compares an incomplete picture and passes while half the schema is
 unmapped.
 

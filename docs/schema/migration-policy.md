@@ -12,6 +12,28 @@ that never ran anywhere, and every one of them has to keep working forever for a
 
 **Every change after the baseline is its own migration** under the full policy below.
 
+### Editing the baseline means RECREATING the database, not migrating
+
+While the baseline has not been applied anywhere real it is still free to change. When it
+does change, **drop the database and re-run it**:
+
+```bash
+docker compose down -v && docker compose up -d --wait
+pnpm api:migrate
+```
+
+`alembic downgrade base` followed by `upgrade head` looks equivalent and is not. The
+downgrade that runs is the one currently on disk, which has no knowledge of objects a
+previous version of itself created. Verified: a database built by the enum-era baseline,
+downgraded and upgraded with the current file, keeps two orphaned Postgres enum types.
+`test_no_native_enum_types_remain` catches that, but only if you run it.
+
+The general rule: a baseline edit means the previous state never legitimately existed, so
+there is nothing to migrate *from*.
+
+**This stops the moment 0001 reaches staging.** After that the baseline is immutable and
+every change is a new revision.
+
 The DDL is **embedded verbatim** in `0001_initial_schema.py` rather than read from
 `schema/schema.sql`. A migration must be immutable: if it read the file, editing that
 file would retroactively change what the revision does. `schema/schema.sql` is the
@@ -62,6 +84,37 @@ Never `ADD COLUMN ... NOT NULL` without a default on a large table. It takes an
 
 A drop is only permitted after the field has had **zero reads for 30 days**, verified in
 logs, and after the oldest supported app version no longer references it.
+
+## Adding or removing a permitted value
+
+The schema uses `text` plus a named `CHECK` rather than Postgres enums (ADR-0027), so this
+is an ordinary transactional migration:
+
+```python
+def upgrade() -> None:
+    op.drop_constraint(
+        "connections_channel_check_values", "connections", type_="check"
+    )
+    op.create_check_constraint(
+        "connections_channel_check_values",
+        "connections",
+        "channel IN ('qr_live', 'qr_static', 'nfc', 'link', 'wallet', 'beacon')",
+    )
+```
+
+Fully reversible, runs inside a transaction, and removal works the same way.
+
+Two rules:
+
+- **Add the Python member in the same PR.** `tests/test_enum_sync.py` fails otherwise,
+  which is the point: a value the application cannot read raises `LookupError` at runtime
+  on whichever code path touches it first.
+- **On a large table, use `NOT VALID` then `VALIDATE CONSTRAINT`** in a separate step, so
+  the validation scan does not hold a lock.
+
+**Do not reintroduce a native enum type.** `test_no_native_enum_types_remain` fails if one
+appears. Enums cannot have a value removed and `ADD VALUE` cannot run in a transaction,
+which is why we moved off them.
 
 ## Locking rules
 

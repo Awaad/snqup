@@ -1,6 +1,6 @@
 # ADR-0019: No CMS; constrained editor writing to our own database
 
-**Status:** Accepted
+**Status:** Accepted, extended by ADR-0027
 **Date:** 2026-09-04
 
 ## Context
@@ -27,6 +27,12 @@ is hostile.
 request. This is sufficient for a long time and requires no additional service.
 
 Revisit only if non-technical staff need to publish marketing content without a deploy.
+
+**ADR-0027 makes that revisit cheap.** Presentational content lives in `event_content`,
+separate from the operational fields in `events`, and is read through
+`EventsService.content_for()` rather than joined from a router. Swapping the storage for a
+CMS, or for structured session tables, becomes a resolver change that touches neither
+`events`, the dashboard, nor the API shape.
 
 ## Consequences
 

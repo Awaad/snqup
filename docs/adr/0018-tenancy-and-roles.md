@@ -1,6 +1,6 @@
 # ADR-0018: Two tenant types: organizations and events
 
-**Status:** Accepted
+**Status:** Accepted, partially amended by ADR-0027
 **Date:** 2026-09-04
 
 ## Context
@@ -22,9 +22,15 @@ branding, or giving a company admin no way to delegate a single event.
 ```
 organizations
 organization_members   role: owner | admin | member
-events                 organization_id NULLABLE (solo organizers exist)
+events                 organization_id NOT NULL (see amendment below)
 event_staff            role: owner | manager | scanner | viewer
 ```
+
+**Amended by ADR-0027.** This ADR originally made `events.organization_id` nullable so a
+solo organizer would not need a shell organization. That reasoning was wrong: a nullable
+owner made every organization-scoped query carry a second branch, and made organizer
+billing attach to a user sometimes and an organization other times. Solo organizers now
+get a personal organization at signup.
 
 Powers are deliberately separate. "Can edit the organization's brand" and "can view this
 event's dashboard" are different, and neither implies the other.
