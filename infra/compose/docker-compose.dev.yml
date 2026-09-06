@@ -1,0 +1,46 @@
+# Local development only. Staging and production use Supabase for Postgres
+# (ADR-0005) - backups, PITR and pooling are worth $25/month.
+name: acme-dev
+
+services:
+  postgres:
+    # pgvector, not plain postgres: the baseline migration enables the vector
+    # extension and CREATE EXTENSION fails when it is unavailable.
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: acme
+    ports: ['5432:5432']
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  valkey:
+    image: valkey/valkey:8-alpine
+    # Nothing in Valkey is durable (ADR-0007). Total loss must degrade the
+    # system, never corrupt it: rate limits reset, idempotency windows are
+    # lost, caches go cold, jobs re-enqueue from their Postgres source.
+    command: >
+      valkey-server
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+      --appendfsync everysec
+    ports: ['6379:6379']
+    volumes:
+      - valkey-data:/data
+    healthcheck:
+      test: ['CMD', 'valkey-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  postgres-data:
+  valkey-data:
