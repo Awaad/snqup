@@ -8,6 +8,7 @@ otherwise be a contact database.
 """
 
 import logging
+from collections.abc import MutableMapping
 from typing import Any
 
 import structlog
@@ -31,22 +32,24 @@ SENSITIVE_KEYS = frozenset(
 REDACTED = "[redacted]"
 
 
-def _redact(value: Any) -> Any:
+def _redact(value: object) -> object:
     if isinstance(value, dict):
         return {
-            k: (REDACTED if k.lower() in SENSITIVE_KEYS else _redact(v))
-            for k, v in value.items()  # type: ignore[union-attr]
+            k: (REDACTED if str(k).lower() in SENSITIVE_KEYS else _redact(v))
+            for k, v in value.items()
         }
     if isinstance(value, list):
-        return [_redact(v) for v in value]  # type: ignore[union-attr]
+        return [_redact(v) for v in value]
     return value
 
 
 def redact_processor(
-    _logger: Any, _name: str, event_dict: structlog.types.EventDict
-) -> structlog.types.EventDict:
+    _logger: object, _name: str, event_dict: MutableMapping[str, Any]
+) -> MutableMapping[str, Any]:
     """Recursive so that logging a whole object cannot bypass redaction."""
-    return _redact(dict(event_dict))  # type: ignore[return-value]
+    redacted = _redact(dict(event_dict))
+    assert isinstance(redacted, dict)
+    return redacted
 
 
 def configure_logging(*, level: str, service: str, env: str, version: str) -> None:
@@ -66,9 +69,7 @@ def configure_logging(*, level: str, service: str, env: str, version: str) -> No
             structlog.processors.dict_tracebacks,
             structlog.processors.JSONRenderer(),
         ],
-        wrapper_class=structlog.make_filtering_bound_logger(
-            getattr(logging, level.upper())
-        ),
+        wrapper_class=structlog.make_filtering_bound_logger(getattr(logging, level.upper())),
         cache_logger_on_first_use=True,
     )
 
