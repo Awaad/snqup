@@ -31,7 +31,16 @@ forbidden_modules =
     acme.domains.events.models
     acme.domains.billing.models
     acme.domains.safety.models
-allow_indirect_imports = False
+# TRUE, deliberately. The rule is "do not import another domain's internals
+# DIRECTLY". A domain's own service necessarily uses its own repository, so
+# forbidding the indirect path makes the service interface - the one thing
+# domains ARE allowed to import - unusable:
+#
+#   cards.service -> identity.service -> identity.repository
+#
+# would be reported as a violation, leaving no legal way to call across
+# domains at all.
+allow_indirect_imports = True
 
 [importlinter:contract:2]
 name = Core is independent of every domain

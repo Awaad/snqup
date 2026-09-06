@@ -1,6 +1,6 @@
 """Application entrypoint."""
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 import sentry_sdk
@@ -9,6 +9,8 @@ from fastapi.responses import ORJSONResponse
 
 from acme.api.health import router as health_router
 from acme.api.middleware import RequestContextMiddleware
+from acme.api.routers.cards import public_router as cards_public_router
+from acme.api.routers.cards import router as cards_router
 from acme.core.auth import JwtVerifier
 from acme.core.cache import create_redis
 from acme.core.config import get_settings
@@ -18,7 +20,7 @@ from acme.core.logging import configure_logging
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     settings = get_settings()
 
     configure_logging(
@@ -75,8 +77,8 @@ def create_app() -> FastAPI:
     app.add_exception_handler(ApiError, api_error_handler)  # type: ignore[arg-type]
 
     app.include_router(health_router)
-    # Domain routers mount here as they land:
-    #   app.include_router(cards_router, prefix="/v1")
+    app.include_router(cards_router)
+    app.include_router(cards_public_router)
 
     return app
 
