@@ -15,7 +15,19 @@ dependencies = [
     "sqlalchemy[asyncio]==2.0.52",
     "alembic==1.19.2",
     "asyncpg==0.31.0",
-    "redis==8.1.0",
+    # Migrations run on a SYNC driver, the app on asyncpg. Not duplication:
+    # asyncpg sends everything as a prepared statement and PostgreSQL refuses
+    # multiple commands in one, so a baseline migration containing 600 lines of
+    # DDL fails with "cannot insert multiple commands into a prepared
+    # statement". Alembic has no reason to be async anyway.
+    "psycopg[binary]==3.3.2",
+    # Capped by arq 0.28.0, which requires redis[hiredis]>=4.2.0,<6.
+    # Nothing we do needs a newer client: the sliding-window rate limiter,
+    # idempotency keys, response cache and ARQ broker all work on 5.x, and
+    # redis-py 5.3.1 talks to a Valkey 8 server fine. The 6/7/8 client lines
+    # exist to track Redis server version numbering, not to add anything here.
+    # Revisit when arq lifts the cap.
+    "redis[hiredis]==5.3.1",
     "arq==0.28.0",
     "structlog==26.1.0",
     "orjson==3.12.0",
