@@ -12,10 +12,11 @@ That is a bad failure to debug during someone's conference.
 """
 
 from collections.abc import AsyncIterator
+from enum import Enum
 from typing import Any
 
+from sqlalchemy import Enum as SAEnum
 from sqlalchemy import types
-from sqlalchemy.dialects.postgresql import ENUM
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -40,14 +41,32 @@ class CIText(types.UserDefinedType[str]):
         return "CITEXT"
 
 
-def pg_enum(name: str) -> ENUM:
-    """Reference an enum the migration already created.
+def constrained[E: Enum](python_enum: type[E]) -> SAEnum:
+    """Map a Python enum onto a `text` column with a CHECK constraint.
 
-    create_type=False matters: the schema is owned by the migration chain, not
-    by model metadata. Without it, SQLAlchemy tries to CREATE TYPE on first use
-    and fails on a database that already has it.
+    native_enum=False so SQLAlchemy treats the column as text rather than
+    expecting a Postgres enum type. create_constraint=False because the
+    migration owns the schema - the CHECK already exists and model metadata
+    must not try to add a second one.
+
+    length=None keeps it TEXT rather than VARCHAR(n). SQLAlchemy would
+    otherwise size the column to the longest CURRENT value, so adding a longer
+    value later would need an ALTER COLUMN TYPE - the exact friction we moved
+    off Postgres enums to avoid.
+
+    values_callable makes the VALUES travel, not the member NAMES. Without it
+    SQLAlchemy sends `PERSONAL` where the constraint expects `personal`.
+
+    tests/test_enum_sync.py compares these against the database CHECK
+    constraints in both directions.
     """
-    return ENUM(name=name, create_type=False)
+    return SAEnum(
+        python_enum,
+        native_enum=False,
+        create_constraint=False,
+        length=None,
+        values_callable=lambda e: [m.value for m in e],
+    )
 
 
 class Base(DeclarativeBase):
