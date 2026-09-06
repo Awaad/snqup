@@ -48,6 +48,10 @@ def _sync_url(url: str) -> str:
 database_url = os.environ.get("DATABASE_URL")
 if database_url:
     config.set_main_option("sqlalchemy.url", _sync_url(database_url))
+    
+current_url = config.get_main_option("sqlalchemy.url")
+if current_url:
+    config.set_main_option("sqlalchemy.url", _sync_url(current_url))
 
 target_metadata = Base.metadata
 
