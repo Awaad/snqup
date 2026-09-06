@@ -53,7 +53,10 @@ packages/
   api-client/   GENERATED from openapi.json
   tokens/       GENERATED from tokens.json
   shared/       hand-written cross-platform validation and formatting
-infra/          Compose, deploy scripts, SOPS secrets
+compose.yaml    Local Postgres + Valkey. At the root so `docker compose up`
+                needs no -f flag; Compose v2 looks for this name first.
+docker-init/    SQL run once on first container start (extensions)
+infra/          Deploy scripts, SOPS secrets
 docs/
 ```
 
@@ -73,6 +76,17 @@ apps/api/src/acme/
 ```
 
 Each domain: `router.py`, `service.py`, `repository.py`, `models.py`, `schemas.py`.
+
+**`exchange` is the exception: it owns no tables.** There is no `models.py` and no
+`repository.py` there, deliberately. The transaction writes to `connections` and
+`connection_views`, which the connections domain owns; giving exchange its own
+repository would put the same tables under two owners. It calls services instead.
+
+**`acme/registry.py` sits beside `core/` and `domains/`, not inside either.** It imports
+every models module so `Base.metadata` is complete for Alembic and the drift test. It was
+in `core/` first and `import-linter` rejected it, correctly — `core/` is infrastructure
+and must not know a domain exists. It is a composition root, and putting it outside the
+layers keeps the contract enforceable rather than carved out with an exception.
 
 **Import rules, enforced by `import-linter`:**
 
@@ -157,7 +171,8 @@ commit rebuilds the marketing site.
 
 | Tool | Purpose |
 |---|---|
-| **uv** | Dependency resolution and virtualenv. Fast, lockfile-based. |
+| **uv** | Dependency resolution and virtualenv. Lockfile committed. |
+| **psycopg** | Migrations only. asyncpg cannot run multi-statement DDL. |
 | **Ruff** | Lint and format. Replaces black, isort, flake8, pyupgrade. |
 | **mypy** | `--strict`. Non-negotiable on `domains/` and `core/`. |
 | **import-linter** | Enforces ADR-0025 boundaries |
@@ -310,6 +325,9 @@ A summary, because "we agreed to" is not enforcement.
 | Tenant isolation | repository chokepoint + dedicated test suite |
 | Migration safety | migration lint + review checklist |
 | Ownership | `CODEOWNERS` |
+| Model/database drift | `test_model_schema_sync.py` |
+| Schema invariants | `test_schema_invariants.py` |
+| Baseline migration drift | `check-schema-sync.sh` |
 
 Everything else is convention and will drift. That is acceptable for style; it is not
 acceptable for the rows in this table.

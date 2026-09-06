@@ -6,6 +6,22 @@
 separate document because schema changes need Mobile and Web review, and because the
 rules here are easy to violate under time pressure.
 
+## Running it locally
+
+```bash
+docker compose up -d --wait     # pgvector/pgvector:pg17 + Valkey
+pnpm api:migrate                # alembic upgrade head
+pnpm api:test
+```
+
+The image is **`pgvector/pgvector:pg17`**, not plain `postgres`. The baseline enables the
+`vector` extension, and `CREATE EXTENSION` fails outright when it is unavailable —
+`IF NOT EXISTS` does not help. `postgres:17-alpine` cannot run our migration at all.
+
+Migrations run **synchronously on psycopg** while the app runs on asyncpg. asyncpg sends
+every statement as a prepared statement and PostgreSQL refuses multiple commands in one,
+so a 600-line baseline fails outright on it. Alembic has no reason to be async.
+
 ## Source of truth
 
 The Alembic chain is executable truth. `schema/schema.sql` is the reference document. If
@@ -39,6 +55,24 @@ note to B (ADR-0003). Any PR that moves note data onto the edge is rejected.
 **5. Columns marked UNUSED IN v1 are not dead code.** `discoverable_at`,
 `discovery_prefs`, `connections.visibility` exist so v1.1 discovery needs no migration
 (ADR-0023). They are commented in the schema pointing at the ADR.
+
+## Models are hand-written and drift is a test failure
+
+The schema is owned by the migration chain; models are written to match it. Nothing
+enforces that automatically, so `tests/test_model_schema_sync.py` does — tables, columns
+and indexes, in both directions.
+
+This matters more than it looks. A drifted model makes `alembic revision --autogenerate`
+emit spurious changes on **every** future migration. People learn to skim past them, and
+then a real change hides in the noise.
+
+It has already earned its place: it caught `organizations.slug` having no uniqueness at
+all, because a schema edit silently applied half of what was intended (finding 10 in
+`schema/review-2026-09-05.md`).
+
+`core/registry.py` imports every models module so `Base.metadata` is complete. Without
+it, the drift test compares an incomplete picture and passes while half the schema is
+unmapped.
 
 ## Schema invariants are tested, not assumed
 

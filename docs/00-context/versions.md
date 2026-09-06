@@ -84,7 +84,8 @@ Set this up on day one rather than discovering it in week six.
 | alembic | 1.19.2 | |
 | asyncpg | 0.31.0 | |
 | uvicorn[standard] | 0.52.4 | |
-| redis | 8.1.0 | Valkey-compatible client |
+| redis[hiredis] | **5.3.1** | **Capped by arq**, see below |
+| psycopg[binary] | 3.3.2 | Migrations only, see below |
 | arq | 0.28.0 | Job queue |
 | structlog | 26.1.0 | |
 | orjson | 3.12.0 | |
@@ -117,12 +118,50 @@ less supply-chain surface and fully deterministic.
 mutable; the tj-actions compromise is why this matters. Do it before handling production
 secrets in CI.
 
+## Two pins that are not "latest", and why
+
+**`redis[hiredis]==5.3.1`, not 8.1.0.** `arq==0.28.0` (the current release) requires
+`redis[hiredis]>=4.2.0,<6`. Pinning both at latest produces an unsatisfiable resolution:
+
+```
+Because arq==0.28.0 depends on redis[hiredis]>=4.2.0,<6 and your project depends
+on redis==8.1.0, we can conclude that your project's requirements are
+unsatisfiable.
+```
+
+Nothing we do needs a newer client. The sliding-window rate limiter, idempotency keys,
+response cache and ARQ broker all work on 5.x, and redis-py 5.3.1 talks to a Valkey 8
+server fine — the 6/7/8 client lines exist to track Redis *server* version numbering.
+arq itself is current (April 2026, supports 3.13 and 3.14), so this is a client cap, not
+an abandoned dependency. Revisit when arq lifts it.
+
+Alternatives if the cap ever becomes a real constraint: `taskiq` + `taskiq-redis`
+(asyncio-native, allows `redis>=8.0`) or `dramatiq` (allows `redis<9`, but not
+asyncio-native).
+
+**`psycopg[binary]` alongside `asyncpg`.** Not duplication. Migrations run synchronously
+on psycopg because asyncpg sends every statement as a prepared statement and PostgreSQL
+refuses multiple commands in one:
+
+```
+asyncpg.exceptions.PostgresSyntaxError:
+    cannot insert multiple commands into a prepared statement
+```
+
+A baseline migration containing 600 lines of DDL cannot run on asyncpg at all. Alembic
+has no reason to be async, so `migrations/env.py` rewrites the URL and runs sync.
+
 ## Services
 
 | | Version |
 |---|---|
-| Postgres | 17 (dev container; Supabase default in staging/prod) |
+| Postgres | **`pgvector/pgvector:pg17`**, not plain `postgres` |
 | Valkey | 8 |
+
+The baseline enables the `vector` extension (unused in v1, present so ADR-0023 discovery
+needs no migration). `CREATE EXTENSION` fails outright when the extension is unavailable
+— `IF NOT EXISTS` does not help — so `postgres:17-alpine` cannot run our migration.
+Supabase ships pgvector in production.
 
 ## Upgrade policy
 

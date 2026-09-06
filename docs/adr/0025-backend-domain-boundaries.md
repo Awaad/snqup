@@ -31,8 +31,15 @@ apps/api/src/acme/
     events/       events, attendees, staff, roster, dashboard aggregates
     billing/      entitlements, webhooks, reconciliation
     safety/       reports, blocks, audit log
+    notifications/ device tokens, notification inbox
   core/          db, cache, auth adapter, errors, logging, jobs runtime
 ```
+
+**`notifications` was added while writing the models**, and is not in the original list.
+Device tokens and the notification inbox are used by `connections` (follow-up reminders,
+reciprocity nudges), `events` (announcements, post-event digest) and `identity` (account
+mail). Putting them inside any one of those would force the other two to import across a
+boundary for something none of them owns.
 
 **The import rule:**
 
@@ -78,6 +85,21 @@ efficiency. Where a cross-domain read is genuinely hot, the answer is a purpose-
 model in the calling domain, not a boundary violation.
 
 **Bad.** `import-linter` is another CI step and another config file to maintain.
+
+**Note on model registration.** `core/registry.py` imports every domain's `models`
+module so `Base.metadata` is complete for Alembic and the drift test. It is the one
+module permitted to import across domain boundaries, it imports only models, and nothing
+imports it except `env.py` and the drift test.
+
+**Note on foreign keys.** Cross-domain FKs are declared by table name string
+(`ForeignKey("users.id")`), never by importing the other domain's model class. A string
+carries no import. Consequently **no ORM `relationship()` crosses a domain boundary** —
+cross-domain data comes from a service call. That costs some convenience and is the
+entire reason the boundary holds.
+
+**Note.** The shared infrastructure package is named `core/`, not `platform/`. `platform`
+is a Python standard library module name; absolute imports resolve correctly, but the
+shadowing confuses readers and some tooling.
 
 ## Alternatives considered
 
