@@ -2,6 +2,10 @@
 
 Runs SYNCHRONOUSLY on psycopg, while the application runs on asyncpg.
 
+The database URL comes from acme.core.config.DatabaseSettings, the same narrow
+model the test suite uses, so `alembic upgrade head` and `pytest` can never
+disagree about which database they mean.
+
 That is deliberate, not an oversight. asyncpg sends every statement as a
 prepared statement, and PostgreSQL refuses multiple commands in one:
 
@@ -27,30 +31,18 @@ Two other things here are load-bearing rather than boilerplate:
 from logging.config import fileConfig
 
 from alembic import context
-from pydantic import PostgresDsn, ValidationError
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import ValidationError
 from sqlalchemy import engine_from_config, pool, text
 from sqlalchemy.engine import Connection
 
 from acme import registry  # noqa: F401  (registers every model)
+from acme.core.config import DatabaseSettings
 from acme.core.db import Base
 
 config = context.config
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
-
-
-class MigrationSettings(BaseSettings):
-    """Just the database URL.
-
-    Reads DATABASE_URL from the environment, falling back to .env, so
-    `uv run alembic upgrade head` works with no exports.
-    """
-
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
-
-    database_url: PostgresDsn
 
 
 def _sync_url(url: str) -> str:
@@ -60,7 +52,7 @@ def _sync_url(url: str) -> str:
 
 def _resolve_url() -> str:
     try:
-        settings = MigrationSettings()  # type: ignore[call-arg]
+        settings = DatabaseSettings()  # type: ignore[call-arg]
     except ValidationError as exc:
         raise SystemExit(
             "DATABASE_URL is not set.\n\n"

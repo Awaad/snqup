@@ -146,3 +146,58 @@ async def test_indexes_match(conn: AsyncConnection) -> None:
         f"indexes in the database but not declared on any model: "
         f"{sorted(missing_in_model)}. Autogenerate will try to DROP these."
     )
+
+
+async def test_autogenerate_detects_no_changes(conn: AsyncConnection) -> None:
+    """`alembic revision --autogenerate` must produce nothing.
+
+    This is the test the whole drift suite exists to protect. A model type that
+    merely *renders* as the database type is not enough: sqlalchemy.Enum with
+    native_enum=False compiles to VARCHAR, and against a TEXT column
+    autogenerate reported a type change on all eighteen constrained columns,
+    every run.
+
+    Eighteen spurious diffs is not cosmetic. People learn to skim autogenerate
+    output, and then a real change - `snapshot_version` was genuinely SMALLINT
+    in the database and Integer in the model - hides in the noise. Both were
+    found together, which is exactly the point.
+    """
+    from alembic.autogenerate import compare_metadata
+    from alembic.migration import MigrationContext
+
+    from acme.core.db import Base
+
+    def _diff(sync_conn: object) -> list[object]:
+        context = MigrationContext.configure(
+            sync_conn,  # type: ignore[arg-type]
+            opts={"compare_type": True, "compare_server_default": True},
+        )
+        return list(compare_metadata(context, Base.metadata))
+
+    diffs = await conn.run_sync(_diff)  # type: ignore[arg-type]
+
+    # compare_metadata returns column-level diffs wrapped in a LIST, not as a
+    # flat tuple - a filter checking only isinstance(d, tuple) silently matches
+    # nothing and the test passes while drift exists. Found by mutation-testing
+    # this test, not by reading it.
+    interesting = {
+        "add_table",
+        "remove_table",
+        "add_column",
+        "remove_column",
+        "modify_type",
+        "modify_nullable",
+    }
+
+    def _kind(diff: object) -> str | None:
+        if isinstance(diff, list):
+            diff = diff[0] if diff else None
+        if isinstance(diff, tuple) and diff:
+            return str(diff[0])
+        return None
+
+    relevant = [d for d in diffs if _kind(d) in interesting]
+
+    assert not relevant, "alembic autogenerate reports changes:\n  " + "\n  ".join(
+        str(d) for d in relevant
+    )

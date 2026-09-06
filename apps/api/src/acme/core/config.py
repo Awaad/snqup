@@ -44,6 +44,36 @@ class Settings(BaseSettings):
         return self.environment == "production"
 
 
+class DatabaseSettings(BaseSettings):
+    """Just the database URL, resolved from the environment or .env.
+
+    Deliberately narrow. Alembic and the test suite both need to find the
+    database and neither needs a JWT issuer, an audience or Redis. Requiring
+    the full Settings for a migration is what leads to someone pasting a URL
+    into alembic.ini; requiring it for tests leads to a hardcoded fallback in
+    conftest.
+
+    There is no default. A missing URL must say so, not silently point at a
+    database that does not exist.
+    """
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    database_url: PostgresDsn
+    #: Optional override so the suite can target a database other than the one
+    #: used for development. Unset is fine: every fixture rolls back, so
+    #: running against the dev database leaves nothing behind.
+    test_database_url: PostgresDsn | None = None
+
+    @property
+    def testing_url(self) -> str:
+        return str(self.test_database_url or self.database_url)
+
+
 @lru_cache
 def get_settings() -> Settings:
     # Values come from the environment; mypy cannot see that.

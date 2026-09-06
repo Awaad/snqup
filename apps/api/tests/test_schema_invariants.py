@@ -33,6 +33,36 @@ async def _user(conn: AsyncConnection, uid, email: str) -> str:
     return user_id
 
 
+async def _org(conn: AsyncConnection, uid, slug: str) -> str:
+    """Every event needs an organization now (ADR-0027).
+
+    A solo organizer gets a personal one at signup; these tests create it
+    directly.
+    """
+    org_id = uid()
+    await conn.execute(
+        text(
+            "INSERT INTO organizations (id, name, slug, is_personal)"
+            " VALUES (:id, :name, :slug, true)"
+        ),
+        {"id": org_id, "name": slug, "slug": slug},
+    )
+    return org_id
+
+
+async def _event(conn: AsyncConnection, uid, *, created_by: str, org_id: str, code: str) -> str:
+    event_id = uid()
+    await conn.execute(
+        text(
+            "INSERT INTO events (id, organization_id, created_by, name, code,"
+            " starts_at, ends_at, timezone) VALUES (:id, :org, :by, 'E', :code,"
+            " now(), now() + interval '1 day', 'Europe/Berlin')"
+        ),
+        {"id": event_id, "org": org_id, "by": created_by, "code": code},
+    )
+    return event_id
+
+
 async def _connection(
     conn: AsyncConnection, uid, low: str, high: str, event_id: str | None = None
 ) -> str:
@@ -158,15 +188,8 @@ class TestSoftDeleteDoesNotBlockRejoining:
 
     async def test_attendee_can_leave_and_rejoin(self, conn: AsyncConnection, uid) -> None:
         organizer = await _user(conn, uid, "org@example.com")
-        event_id = uid()
-        await conn.execute(
-            text(
-                "INSERT INTO events (id, created_by, name, code, starts_at, ends_at,"
-                " timezone) VALUES (:id, :by, 'E', 'CODE1', now(),"
-                " now() + interval '1 day', 'Europe/Berlin')"
-            ),
-            {"id": event_id, "by": organizer},
-        )
+        org_id = await _org(conn, uid, "org-code1")
+        event_id = await _event(conn, uid, created_by=organizer, org_id=org_id, code="CODE1")
 
         await conn.execute(
             text("INSERT INTO event_attendees (id, event_id, user_id) VALUES (:id, :e, :u)"),
@@ -187,15 +210,8 @@ class TestSoftDeleteDoesNotBlockRejoining:
     async def test_double_join_is_still_rejected(self, conn: AsyncConnection, uid) -> None:
         """Allowing rejoin must not have allowed joining twice."""
         organizer = await _user(conn, uid, "org2@example.com")
-        event_id = uid()
-        await conn.execute(
-            text(
-                "INSERT INTO events (id, created_by, name, code, starts_at, ends_at,"
-                " timezone) VALUES (:id, :by, 'E', 'CODE2', now(),"
-                " now() + interval '1 day', 'Europe/Berlin')"
-            ),
-            {"id": event_id, "by": organizer},
-        )
+        org_id = await _org(conn, uid, "org-code2")
+        event_id = await _event(conn, uid, created_by=organizer, org_id=org_id, code="CODE2")
         for _ in range(1):
             await conn.execute(
                 text("INSERT INTO event_attendees (id, event_id, user_id) VALUES (:id, :e, :u)"),
@@ -217,16 +233,9 @@ class TestSoftDeleteDoesNotBlockRejoining:
 async def test_soft_deleted_event_releases_its_join_code(conn: AsyncConnection, uid) -> None:
     """A deleted event must not hold its join code hostage forever."""
     organizer = await _user(conn, uid, "org3@example.com")
+    org_id = await _org(conn, uid, "org-reused")
     for _ in range(2):
-        event_id = uid()
-        await conn.execute(
-            text(
-                "INSERT INTO events (id, created_by, name, code, starts_at, ends_at,"
-                " timezone) VALUES (:id, :by, 'E', 'REUSED', now(),"
-                " now() + interval '1 day', 'Europe/Berlin')"
-            ),
-            {"id": event_id, "by": organizer},
-        )
+        event_id = await _event(conn, uid, created_by=organizer, org_id=org_id, code="REUSED")
         await conn.execute(
             text("UPDATE events SET deleted_at = now() WHERE id = :id"),
             {"id": event_id},
@@ -269,6 +278,94 @@ async def test_soft_deleted_organization_releases_its_slug(conn: AsyncConnection
         text("INSERT INTO organizations (id, name, slug) VALUES (:id, 'B', 'reused')"),
         {"id": uid()},
     )
+
+
+async def test_event_requires_an_organization(conn: AsyncConnection, uid) -> None:
+    """ADR-0027. Every event has an organizing entity.
+
+    A nullable owner meant every organization-scoped query needed a second
+    branch (`OR organization_id IS NULL AND created_by = ?`), and forgetting it
+    is either a leak or a silently empty result. Solo organizers get a personal
+    organization instead.
+    """
+    organizer = await _user(conn, uid, "noorg@example.com")
+
+    with pytest.raises((IntegrityError, DBAPIError)):
+        await conn.execute(
+            text(
+                "INSERT INTO events (id, created_by, name, code, starts_at,"
+                " ends_at, timezone) VALUES (:id, :by, 'E', 'NOORG', now(),"
+                " now() + interval '1 day', 'Europe/Berlin')"
+            ),
+            {"id": uid(), "by": organizer},
+        )
+
+
+async def test_event_content_is_separate_from_events(conn: AsyncConnection) -> None:
+    """ADR-0027 / ADR-0019.
+
+    `events` holds operational data we own forever; presentational content
+    lives in `event_content` so a future CMS is a resolver change rather than a
+    schema migration. If body or banner_path ever appear on `events`, that seam
+    is gone.
+    """
+    event_columns = set(
+        (
+            await conn.execute(
+                text(
+                    "SELECT column_name FROM information_schema.columns WHERE table_name = 'events'"
+                )
+            )
+        ).scalars()
+    )
+    assert not event_columns & {"body", "description", "banner_path"}, (
+        "presentational content belongs in event_content, not events"
+    )
+
+    content_columns = set(
+        (
+            await conn.execute(
+                text(
+                    "SELECT column_name FROM information_schema.columns"
+                    " WHERE table_name = 'event_content'"
+                )
+            )
+        ).scalars()
+    )
+    assert {"body", "banner_path"} <= content_columns
+
+
+async def test_connection_records_when_it_happened(conn: AsyncConnection, uid) -> None:
+    """occurred_at is distinct from created_at (ADR-0027).
+
+    An offline exchange syncs late. Without a separate column, every
+    time-based organizer metric would attribute it to the moment the wifi came
+    back, and the peak-activity chart would spike at reconnection.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    alice = await _user(conn, uid, "occ-a@example.com")
+    bob = await _user(conn, uid, "occ-b@example.com")
+    low, high = sorted([alice, bob])
+
+    met_at = datetime.now(UTC) - timedelta(hours=3)
+    conn_id = uid()
+    await conn.execute(
+        text(
+            "INSERT INTO connections (id, user_low_id, user_high_id,"
+            " card_low_snapshot, card_high_snapshot, channel, occurred_at)"
+            " VALUES (:id, :low, :high, '{}', '{}', 'qr_live', :met)"
+        ),
+        {"id": conn_id, "low": low, "high": high, "met": met_at},
+    )
+
+    row = (
+        await conn.execute(
+            text("SELECT occurred_at, created_at FROM connections WHERE id = :id"),
+            {"id": conn_id},
+        )
+    ).one()
+    assert row.occurred_at < row.created_at, "occurred_at must record the meeting, not the sync"
 
 
 # ---------------------------------------------------------------------------
@@ -401,15 +498,8 @@ async def test_duplicate_roster_import_is_rejected(conn: AsyncConnection, uid) -
     who made a connection (ADR-0012).
     """
     organizer = await _user(conn, uid, "roster@example.com")
-    event_id = uid()
-    await conn.execute(
-        text(
-            "INSERT INTO events (id, created_by, name, code, starts_at, ends_at,"
-            " timezone) VALUES (:id, :by, 'E', 'ROSTER1', now(),"
-            " now() + interval '1 day', 'Europe/Berlin')"
-        ),
-        {"id": event_id, "by": organizer},
-    )
+    org_id = await _org(conn, uid, "org-roster1")
+    event_id = await _event(conn, uid, created_by=organizer, org_id=org_id, code="ROSTER1")
     await conn.execute(
         text(
             "INSERT INTO event_roster_entries (id, event_id, email)"
@@ -478,18 +568,11 @@ class TestConnectionPairInvariants:
         other = await _user(conn, uid, "p6@example.com")
         low, high = sorted([organizer, other])
 
-        events = []
-        for code in ("EV1", "EV2"):
-            event_id = uid()
-            await conn.execute(
-                text(
-                    "INSERT INTO events (id, created_by, name, code, starts_at,"
-                    " ends_at, timezone) VALUES (:id, :by, 'E', :code, now(),"
-                    " now() + interval '1 day', 'Europe/Berlin')"
-                ),
-                {"id": event_id, "by": organizer, "code": code},
-            )
-            events.append(event_id)
+        org_id = await _org(conn, uid, "org-pairs")
+        events = [
+            await _event(conn, uid, created_by=organizer, org_id=org_id, code=code)
+            for code in ("EV1", "EV2")
+        ]
 
         for event_id in events:
             await _connection(conn, uid, low, high, event_id=event_id)
