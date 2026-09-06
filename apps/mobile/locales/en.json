@@ -1,0 +1,4 @@
+{
+  "productName": "TODO",
+  "_comment": "The product name is ONE variable, interpolated as {{productName}}. Never typed inline."
+}
