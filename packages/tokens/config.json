@@ -1,0 +1,36 @@
+{
+  "$comment": "Elevation is the one token that cannot be shared. Tailwind uses box-shadow; React Native uses shadowOffset/shadowRadius/elevation. Per-platform mapping lives in the platform files, NOT in tokens.json. Do not 'fix' the difference (ADR-0017).",
+  "source": ["tokens.json"],
+  "platforms": {
+    "tailwind": {
+      "transformGroup": "js",
+      "buildPath": "dist/",
+      "files": [
+        {
+          "destination": "tailwind.js",
+          "format": "javascript/esm",
+          "options": { "minify": false }
+        }
+      ]
+    },
+    "native": {
+      "transformGroup": "react-native",
+      "buildPath": "dist/",
+      "files": [
+        { "destination": "native.js", "format": "javascript/esm" },
+        { "destination": "native.d.ts", "format": "typescript/module-declarations" }
+      ]
+    },
+    "css": {
+      "transformGroup": "css",
+      "buildPath": "dist/",
+      "files": [
+        {
+          "destination": "tokens.css",
+          "format": "css/variables",
+          "options": { "selector": ":root" }
+        }
+      ]
+    }
+  }
+}
