@@ -24,10 +24,11 @@ Two other things here are load-bearing rather than boilerplate:
                       the block, or it takes an ACCESS EXCLUSIVE lock.
 """
 
-import os
 from logging.config import fileConfig
 
 from alembic import context
+from pydantic import PostgresDsn, ValidationError
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import engine_from_config, pool, text
 from sqlalchemy.engine import Connection
 
@@ -40,18 +41,41 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 
+class MigrationSettings(BaseSettings):
+    """Just the database URL.
+
+    Reads DATABASE_URL from the environment, falling back to .env, so
+    `uv run alembic upgrade head` works with no exports.
+    """
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    database_url: PostgresDsn
+
+
 def _sync_url(url: str) -> str:
     """asyncpg -> psycopg. See the module docstring for why."""
     return url.replace("postgresql+asyncpg://", "postgresql+psycopg://")
 
 
-database_url = os.environ.get("DATABASE_URL")
-if database_url:
-    config.set_main_option("sqlalchemy.url", _sync_url(database_url))
-    
-current_url = config.get_main_option("sqlalchemy.url")
-if current_url:
-    config.set_main_option("sqlalchemy.url", _sync_url(current_url))
+def _resolve_url() -> str:
+    try:
+        settings = MigrationSettings()  # type: ignore[call-arg]
+    except ValidationError as exc:
+        raise SystemExit(
+            "DATABASE_URL is not set.\n\n"
+            "Set it in the environment or in apps/api/.env:\n"
+            "  DATABASE_URL=postgresql+asyncpg://postgres:postgres"
+            "@localhost:5432/acme\n\n"
+            "It is deliberately absent from alembic.ini: a URL there would "
+            "either commit credentials or quietly point migrations at the "
+            "wrong database."
+        ) from exc
+
+    return _sync_url(str(settings.database_url))
+
+
+config.set_main_option("sqlalchemy.url", _resolve_url())
 
 target_metadata = Base.metadata
 
