@@ -1,5 +1,10 @@
 # Local development only. Staging and production use Supabase for Postgres
 # (ADR-0005) - backups, PITR and pooling are worth $25/month.
+#
+# At the repository root, and named compose.yaml, so `docker compose up` works
+# with no -f flag. Compose v2 looks for this filename first. Tucked away under
+# infra/ it needed a flag every time, and anyone typing the obvious command got
+# an error instead of a database.
 name: acme-dev
 
 services:
@@ -14,7 +19,7 @@ services:
     ports: ['5432:5432']
     volumes:
       - postgres-data:/var/lib/postgresql/data
-      - ./init:/docker-entrypoint-initdb.d:ro
+      - ./docker-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U postgres']
       interval: 5s

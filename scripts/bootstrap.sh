@@ -38,7 +38,7 @@ if [ ! -f .env ]; then
 fi
 
 echo "==> Starting Postgres and Valkey"
-docker compose -f infra/compose/docker-compose.dev.yml up -d --wait
+docker compose up -d --wait
 
 echo "==> Running migrations"
 (cd apps/api && uv run alembic upgrade head)

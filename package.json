@@ -27,9 +27,9 @@
     "api:boundaries": "cd apps/api && uv run lint-imports",
     "api:migrate": "cd apps/api && uv run alembic upgrade head",
     "mobile": "pnpm --filter @acme/mobile start",
-    "db:up": "docker compose -f infra/compose/docker-compose.dev.yml up -d",
-    "db:down": "docker compose -f infra/compose/docker-compose.dev.yml down",
-    "db:reset": "docker compose -f infra/compose/docker-compose.dev.yml down -v && pnpm db:up",
+    "db:up": "docker compose up -d --wait",
+    "db:down": "docker compose down",
+    "db:reset": "docker compose down -v && pnpm db:up",
     "prepare": "husky || true"
   },
   "devDependencies": {
