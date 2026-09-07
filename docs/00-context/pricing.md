@@ -39,6 +39,8 @@ estimates.
 | CRM sync | No | Yes | Yes |
 | Custom fields | No | Yes | Yes |
 | Link-in-bio pages | 1 | 5, custom slugs | Same |
+| Custom links per card | **2** | Unlimited | Same |
+| Social handles | Unlimited | Unlimited | Unlimited |
 | Page and card analytics | No | Yes | Yes |
 | Themes | 5 | All + custom colours | Same |
 | QR customisation | No | Colour, logo, corners | Same |
@@ -119,6 +121,7 @@ card.custom_fields            bool
 card.qr_customisation         bool
 card.remove_branding          bool
 link.page_limit               int
+link.custom_limit             int   (-1 = unlimited)
 link.custom_slug              bool
 analytics.card                bool
 analytics.link                bool

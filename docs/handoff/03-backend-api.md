@@ -26,7 +26,7 @@ takes an explicit tenant ID parameter. Omitting the filter must be structurally
 impossible, not merely discouraged. This is why we declined RLS (ADR-0005): authorization
 lives in code that is reviewable and testable.
 
-**`auth/provider.py` is the only module that knows the IdP exists.** Swapping providers
+**`core/auth.py` is the only module that knows the IdP exists.** Swapping providers
 touches this file and nothing else.
 
 ## The exchange endpoint
@@ -83,6 +83,17 @@ connected with which. Suppress all aggregates below a cohort of 10.
 Platform.
 
 ## Entitlements
+
+`FREE_TIER` in `billing/service.py` is the free plan as code. A subject with no
+entitlement rows resolves to it, which means a new user works without anything writing
+rows at signup, and a billing outage degrades to the free tier rather than to "entitled
+to nothing".
+
+`entitlements_active_idx` is unique per *source*, so multiple rows for one key always
+mean multiple sources — the Apple-plus-Stripe case. Conflicts resolve highest-wins, and
+`-1` (unlimited) beats every finite value rather than losing to `max()`.
+
+
 
 `entitlements.check(subject, key)` is the only authorization question about paid features.
 **No code anywhere asks about a payment provider** (ADR-0009).

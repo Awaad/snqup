@@ -30,9 +30,10 @@ not in the locale files.
 | `CARD_NOT_FOUND` | 404 | |
 | `CARD_LIMIT_REACHED` | 403 | Entitlement `card.limit` exceeded |
 | `CARD_SLUG_TAKEN` | 409 | |
-| `CARD_SLUG_RESERVED` | 422 | Matches `reserved_slugs` |
+| `CARD_SLUG_RESERVED` | 422 | Matches `reserved_slugs`. `details.reason` names the category and is user-visible. Also returned for organization and event slugs — the three share one namespace check. |
 | `CARD_SLUG_INVALID` | 422 | Charset or length |
 | `CARD_CUSTOM_FIELDS_NOT_ENTITLED` | 403 | |
+| `CARD_LINK_LIMIT_REACHED` | 403 | Entitlement `link.custom_limit` exceeded. Socials are never capped. |
 | `CARD_QR_CONTRAST_INSUFFICIENT` | 422 | Chosen colours would scan unreliably |
 
 ## Tokens and scanning
@@ -57,6 +58,14 @@ not in the locale files.
 | `CONNECTION_EXPORT_NOT_ENTITLED` | 403 | Workflow export. **Never returned for the GDPR export, which is always free.** |
 | `CONNECTION_MERGE_INVALID` | 422 | Target is not a valid merge destination |
 
+## CRM
+
+| Code | HTTP | Meaning |
+|---|---|---|
+| `CRM_NOT_CONNECTED` | 404 | No live connection for that provider |
+| `CRM_REAUTH_REQUIRED` | 409 | Credentials expired; the user must reconnect |
+| `CRM_PROVIDER_UNAVAILABLE` | 503 | Provider outage or rate limit. Retry with backoff. |
+
 ## Events
 
 | Code | HTTP | Meaning |
@@ -74,6 +83,7 @@ not in the locale files.
 | Code | HTTP | Meaning |
 |---|---|---|
 | `ORG_NOT_FOUND` | 404 | |
+| `ORG_SLUG_TAKEN` | 409 | |
 | `ORG_SEAT_LIMIT_REACHED` | 403 | Enforced at invite time (ADR-0018) |
 | `ORG_DOMAIN_NOT_VERIFIED` | 403 | |
 | `ORG_ROLE_INSUFFICIENT` | 403 | |

@@ -75,7 +75,13 @@ apps/api/src/acme/
   core/          db, cache, auth adapter, errors, logging, jobs runtime
 ```
 
-Each domain: `router.py`, `service.py`, `repository.py`, `models.py`, `schemas.py`.
+Each domain: `service.py`, `repository.py`, `models.py`, `schemas.py`, `enums.py`.
+
+**Routers live in `apps/api/src/acme/api/routers/<domain>.py`, not in the domain.** A
+router depends on FastAPI dependencies (session, tenant, current user), which are
+api-layer concerns, so a router inside a domain makes `acme.domains -> acme.api` — a
+layer violation `import-linter` catches. The domain owns the logic; the api layer owns
+the HTTP surface.
 
 **`exchange` is the exception: it owns no tables.** There is no `models.py` and no
 `repository.py` there, deliberately. The transaction writes to `connections` and

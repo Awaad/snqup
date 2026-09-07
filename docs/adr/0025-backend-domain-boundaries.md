@@ -50,7 +50,15 @@ boundary for something none of them owns.
 - `core/` imports no domain.
 
 **Enforced by `import-linter` in CI**, not by review. Without the tool this decays within a
-month.
+month. It has already caught two violations that passed type-checking and review: a
+router importing `acme.api`, and `cards.service` reaching into `identity.models` for the
+reserved-slug check.
+
+`allow_indirect_imports` is **true**. The rule is "do not import another domain's
+internals *directly*". A domain's own service necessarily uses its own repository, so
+forbidding the transitive path would report `cards.service -> identity.service ->
+identity.repository` as a violation and leave no legal way to call across domains at
+all.
 
 **`exchange` is its own domain, not part of `connections`.** It touches cards,
 connections, events and safety in one transaction. It is the most important code in the
@@ -86,7 +94,7 @@ model in the calling domain, not a boundary violation.
 
 **Bad.** `import-linter` is another CI step and another config file to maintain.
 
-**Note on model registration.** `core/registry.py` imports every domain's `models`
+**Note on model registration.** `registry.py` imports every domain's `models`
 module so `Base.metadata` is complete for Alembic and the drift test. It is the one
 module permitted to import across domain boundaries, it imports only models, and nothing
 imports it except `env.py` and the drift test.
