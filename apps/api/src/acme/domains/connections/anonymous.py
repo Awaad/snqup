@@ -19,13 +19,13 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from acme.core.errors import ApiError
 from acme.domains.cards.service import TokenResolver
-from acme.domains.connections.enums import ScanChannel
-from acme.domains.connections.models import AnonymousScan
+from acme.domains.connections.enums import InteractionKind, ScanChannel
+from acme.domains.connections.models import AnonymousScan, ScanInteraction
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,20 +84,58 @@ class AnonymousScanService:
         await self._session.flush()
         return RecordedScan(scan_id=scan.id, card_owner_id=target.owner_id)
 
-    async def mark_saved(self, scan_id: UUID, *, wallet: bool = False) -> None:
-        """The conversion that matters.
+    async def record_interaction(
+        self, scan_id: UUID, kind: InteractionKind, *, target: str | None = None
+    ) -> None:
+        """What the scanner actually did.
 
-        Views are vanity; a saved vCard means the contact actually landed in
-        someone's phone. This is the metric the fallback page is judged on.
+        Views are vanity. This is what the fallback page is judged on - but
+        "conversion" is broader than a vCard save: tapping the phone number,
+        opening a LinkedIn link or copying an email are all real engagement,
+        and the two booleans this replaced scored every one of them as a miss.
+
+        `target` names the element ('phone', 'linkedin'). NEVER the content: a
+        copy event records that a copy happened, not what was copied. That is
+        the line between measuring engagement and reading over someone's
+        shoulder.
+
+        Idempotent per (scan, kind, target). A double-tap must not double-count
+        a conversion, and clients retry.
         """
         scan = await self._session.get(AnonymousScan, scan_id)
         if scan is None:
             raise ApiError("CARD_NOT_FOUND", status_code=404)
-        if wallet:
-            scan.added_wallet = True
-        else:
-            scan.saved_vcard = True
+
+        existing = await self._session.execute(
+            select(ScanInteraction).where(
+                ScanInteraction.scan_id == scan_id,
+                ScanInteraction.kind == kind,
+                ScanInteraction.target.is_(target)
+                if target is None
+                else ScanInteraction.target == target,
+            )
+        )
+        if existing.scalar_one_or_none() is not None:
+            return
+
+        self._session.add(ScanInteraction(scan_id=scan_id, kind=kind, target=target))
         await self._session.flush()
+
+    async def interaction_summary(self, card_id: UUID) -> dict[InteractionKind, int]:
+        """Counts by kind for one card.
+
+        A LOWER BOUND, always. Screenshots are undetectable and are a common
+        way people keep a card on mobile, so anything built on this must say
+        "at least" rather than implying completeness.
+        """
+        stmt = (
+            select(ScanInteraction.kind, func.count())
+            .join(AnonymousScan, AnonymousScan.id == ScanInteraction.scan_id)
+            .where(AnonymousScan.card_id == card_id)
+            .group_by(ScanInteraction.kind)
+        )
+        rows = (await self._session.execute(stmt)).all()
+        return {kind: int(count) for kind, count in rows}
 
     async def leave_details(
         self,

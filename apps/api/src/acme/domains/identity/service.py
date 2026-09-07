@@ -3,11 +3,17 @@
 from dataclasses import dataclass
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from acme.core.errors import ApiError
 from acme.core.ids import new_id
-from acme.domains.identity.models import ReservedSlug, User, UserProfile
+from acme.domains.identity.models import (
+    DomainVerification,
+    ReservedSlug,
+    User,
+    UserProfile,
+)
 from acme.domains.identity.repository import UserRepository
 
 
@@ -64,6 +70,19 @@ class IdentityService:
             email=profile.email,
             locale=profile.locale,
         )
+
+    async def has_verified_domain(self, organization_id: UUID) -> bool:
+        """Whether an organization has proved control of an email domain.
+
+        Exposed as a service method because domain_verifications belongs to
+        this domain. Events needs it to gate public indexed pages, and reaching
+        into the model directly is exactly the coupling import-linter catches.
+        """
+        stmt = select(DomainVerification).where(
+            DomainVerification.organization_id == organization_id,
+            DomainVerification.verified_at.is_not(None),
+        )
+        return (await self._session.execute(stmt)).first() is not None
 
     async def provision(
         self, *, auth_subject: str, email: str, display_name: str | None = None

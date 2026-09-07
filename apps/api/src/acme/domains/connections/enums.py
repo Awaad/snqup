@@ -30,3 +30,24 @@ class ConnectionVisibility(StrEnum):
 
     PRIVATE = "private"
     DISCOVERABLE = "discoverable"
+
+
+class InteractionKind(StrEnum):
+    """What a scanner did with a card.
+
+    Ordered loosely by strength of signal. VCARD_SAVE and WALLET_ADD mean the
+    contact is kept; the rest mean they acted on it, which is weaker but real -
+    and treating those as non-conversions is what the two old booleans got
+    wrong.
+    """
+
+    VCARD_SAVE = "vcard_save"
+    WALLET_ADD = "wallet_add"
+    LINK_CLICK = "link_click"
+    COPY = "copy"
+    CALL = "call"
+    EMAIL = "email"
+
+
+#: Interactions that mean the contact was KEPT, not merely touched.
+SAVED_KINDS = frozenset({InteractionKind.VCARD_SAVE, InteractionKind.WALLET_ADD})

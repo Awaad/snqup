@@ -14,7 +14,7 @@ from acme.api.deps import RateLimiterDep, SessionDep
 from acme.domains.cards.schemas import PublicCardOut
 from acme.domains.cards.service import TokenResolver
 from acme.domains.connections.anonymous import AnonymousScanService
-from acme.domains.connections.enums import ScanChannel
+from acme.domains.connections.enums import InteractionKind, ScanChannel
 
 router = APIRouter(prefix="/v1", tags=["public"])
 
@@ -91,14 +91,35 @@ async def record_scan(
     return ScanResult(scan_id=recorded.scan_id, card=target.public)
 
 
-@router.post("/scan/{scan_id}/saved", status_code=status.HTTP_204_NO_CONTENT)
-async def mark_saved(scan_id: UUID, session: SessionDep, wallet: bool = False) -> None:
-    """The conversion that matters.
+class InteractionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
-    Views are vanity. A saved vCard means the contact actually landed in
-    someone's phone, and that is what the fallback page is judged on.
+    kind: InteractionKind
+    #: Which element was used ('phone', 'linkedin'). NEVER the content - a copy
+    #: event carries no copied text.
+    target: str | None = Field(default=None, max_length=60)
+
+
+@router.post("/scan/{scan_id}/interactions", status_code=status.HTTP_204_NO_CONTENT)
+async def record_interaction(
+    scan_id: UUID, payload: InteractionRequest, session: SessionDep
+) -> None:
+    """What the scanner did with the card.
+
+    Views are vanity, but "conversion" is broader than a vCard save: tapping
+    the phone number, opening a LinkedIn link or copying an email are all real
+    engagement. The client fires this on tel:/mailto:/link taps, on the browser
+    `copy` event, and on save and Wallet-add.
+
+    Idempotent per (scan, kind, target) - clients retry, and a double-tap must
+    not double-count a conversion.
+
+    Screenshots are undetectable, so every figure built on this is a LOWER
+    BOUND. Say "at least" wherever it surfaces.
     """
-    await AnonymousScanService(session).mark_saved(scan_id, wallet=wallet)
+    await AnonymousScanService(session).record_interaction(
+        scan_id, payload.kind, target=payload.target
+    )
 
 
 @router.post("/scan/{scan_id}/reply", status_code=status.HTTP_204_NO_CONTENT)

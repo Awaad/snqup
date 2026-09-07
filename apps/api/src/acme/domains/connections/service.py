@@ -115,6 +115,59 @@ class ConnectionsService:
         return (await self._session.execute(stmt)).scalar_one_or_none()
 
 
+class EventConnectionStats:
+    """Aggregate counts for one event.
+
+    Lives here because `connections` and `anonymous_scans` belong to this
+    domain. Events asks for numbers; it does not query these tables itself.
+
+    Returns raw counts only - suppression below the minimum cohort is the
+    events domain's decision, since it is the one that knows how many attendees
+    there are.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def for_event(self, event_id: UUID) -> tuple[int, int, int]:
+        """(connections, unique connectors, anonymous scans)."""
+        from sqlalchemy import func
+
+        from acme.domains.connections.models import AnonymousScan
+
+        connections = int(
+            (
+                await self._session.execute(
+                    select(func.count())
+                    .select_from(Connection)
+                    .where(
+                        Connection.event_id == event_id,
+                        Connection.deleted_at.is_(None),
+                    )
+                )
+            ).scalar_one()
+        )
+        pairs = (
+            await self._session.execute(
+                select(Connection.user_low_id, Connection.user_high_id).where(
+                    Connection.event_id == event_id,
+                    Connection.deleted_at.is_(None),
+                )
+            )
+        ).all()
+        unique = len({u for pair in pairs for u in pair})
+        anonymous = int(
+            (
+                await self._session.execute(
+                    select(func.count())
+                    .select_from(AnonymousScan)
+                    .where(AnonymousScan.event_id == event_id)
+                )
+            ).scalar_one()
+        )
+        return connections, unique, anonymous
+
+
 class ConnectionListService:
     """The caller's contact list.
 

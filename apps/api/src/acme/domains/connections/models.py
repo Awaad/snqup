@@ -9,7 +9,6 @@ from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import (
-    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -25,7 +24,12 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from acme.core.db import Base, CIText, constrained
 from acme.core.ids import new_id
-from acme.domains.connections.enums import ConnectionState, ConnectionVisibility, ScanChannel
+from acme.domains.connections.enums import (
+    ConnectionState,
+    ConnectionVisibility,
+    InteractionKind,
+    ScanChannel,
+)
 
 
 class Connection(Base):
@@ -204,8 +208,6 @@ class AnonymousScan(Base):
     token_id: Mapped[UUID | None] = mapped_column(ForeignKey("card_tokens.id", ondelete="SET NULL"))
     event_id: Mapped[UUID | None] = mapped_column(ForeignKey("events.id", ondelete="SET NULL"))
     channel: Mapped[ScanChannel] = mapped_column(constrained(ScanChannel))
-    saved_vcard: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
-    added_wallet: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
 
     reply_email: Mapped[str | None] = mapped_column(CIText())
     reply_name: Mapped[str | None] = mapped_column(Text)
@@ -231,4 +233,35 @@ class AnonymousScan(Base):
     )
 
 
-__all__ = ["AnonymousScan", "Connection", "ConnectionView"]
+class ScanInteraction(Base):
+    """What a scanner actually did, one row per interaction.
+
+    Replaces the saved_vcard/added_wallet booleans, which counted only the
+    strongest signal and scored someone who tapped the phone number or opened a
+    link as a non-conversion.
+
+    KNOWN LIMIT: screenshots are undetectable, and on mobile that is a common
+    way people keep a card. Every figure derived from this table is a LOWER
+    BOUND and analytics copy must say "at least".
+
+    `target` names which element was used ('phone', 'linkedin'). We record that
+    an interaction happened, never its content - a copy event carries no copied
+    text, which is the line between measuring engagement and reading over
+    someone's shoulder.
+    """
+
+    __tablename__ = "scan_interactions"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=new_id)
+    scan_id: Mapped[UUID] = mapped_column(ForeignKey("anonymous_scans.id", ondelete="CASCADE"))
+    kind: Mapped[InteractionKind] = mapped_column(constrained(InteractionKind))
+    target: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("scan_interactions_scan_idx", "scan_id"),
+        Index("scan_interactions_kind_idx", "kind", text("created_at DESC")),
+    )
+
+
+__all__ = ["AnonymousScan", "Connection", "ConnectionView", "ScanInteraction"]

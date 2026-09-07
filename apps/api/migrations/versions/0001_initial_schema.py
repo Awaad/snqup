@@ -550,8 +550,6 @@ CREATE TABLE anonymous_scans (
     token_id            uuid REFERENCES card_tokens(id) ON DELETE SET NULL,
     event_id            uuid REFERENCES events(id) ON DELETE SET NULL,
     channel             text NOT NULL,
-    saved_vcard         boolean NOT NULL DEFAULT false,
-    added_wallet        boolean NOT NULL DEFAULT false,
     -- Optional reply form. Creates a pending exchange and an invitation to claim.
     reply_email         citext,
     reply_name          text,
@@ -566,6 +564,34 @@ CREATE TABLE anonymous_scans (
     CONSTRAINT anonymous_scans_channel_check_values CHECK (channel IN ('qr_live', 'qr_static', 'nfc', 'link', 'wallet'))
 );
 CREATE INDEX anonymous_scans_card_idx ON anonymous_scans (card_id, created_at DESC);
+
+-- What a scanner actually DID, one row per interaction.
+--
+-- Replaces the saved_vcard/added_wallet booleans, which were too narrow: they
+-- counted only the strongest signal and scored a scanner who tapped the phone
+-- number, opened a LinkedIn link or copied an address as a non-conversion.
+--
+-- KNOWN LIMIT, and analytics copy must reflect it: screenshots are
+-- undetectable, and on mobile that is a common way people keep a card. Every
+-- number derived from this table undercounts, so it is reported as "at least".
+--
+-- `target` names WHICH element was used (e.g. 'phone', 'linkedin'). We record
+-- that an interaction happened, never its content - a copy event carries no
+-- copied text, which is the line between measuring engagement and reading over
+-- someone's shoulder.
+CREATE TABLE scan_interactions (
+    id                  uuid PRIMARY KEY,
+    scan_id             uuid NOT NULL REFERENCES anonymous_scans(id) ON DELETE CASCADE,
+    kind                text NOT NULL,
+    target              text,
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT scan_interactions_kind_check_values CHECK (
+        kind IN ('vcard_save', 'wallet_add', 'link_click', 'copy', 'call', 'email')
+    )
+);
+CREATE INDEX scan_interactions_scan_idx ON scan_interactions (scan_id);
+-- Reporting reads by kind across a window, not by scan.
+CREATE INDEX scan_interactions_kind_idx ON scan_interactions (kind, created_at DESC);
 CREATE INDEX anonymous_scans_event_idx ON anonymous_scans (event_id) WHERE event_id IS NOT NULL;
 
 
@@ -779,6 +805,7 @@ TABLES = [
     "billing_events",
     "entitlements",
     "subscriptions",
+    "scan_interactions",
     "anonymous_scans",
     "connection_views",
     "connections",

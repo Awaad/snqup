@@ -18,8 +18,12 @@ from acme.domains.billing.models import Entitlement
 from acme.domains.cards.schemas import CardCreate
 from acme.domains.cards.service import CardsService
 from acme.domains.connections.anonymous import AnonymousScanService, truncate_ip
-from acme.domains.connections.enums import ScanChannel
-from acme.domains.connections.models import AnonymousScan, ConnectionView
+from acme.domains.connections.enums import InteractionKind, ScanChannel
+from acme.domains.connections.models import (
+    AnonymousScan,
+    ConnectionView,
+    ScanInteraction,
+)
 from acme.domains.connections.schemas import ConnectionUpdate
 from acme.domains.connections.service import ConnectionListService
 from acme.domains.events.models import Event, EventAttendee
@@ -366,7 +370,6 @@ class TestAnonymousScan:
 
         scan = await session.get(AnonymousScan, recorded.scan_id)
         assert scan is not None
-        assert scan.saved_vcard is False
 
     async def test_saved_vcard_is_the_conversion_metric(self, session: AsyncSession) -> None:
         """Views are vanity; a save means the contact landed in a phone."""
@@ -379,9 +382,36 @@ class TestAnonymousScan:
         service = AnonymousScanService(session)
         recorded = await service.record(token=token, channel=ScanChannel.QR_STATIC)
 
-        await service.mark_saved(recorded.scan_id)
-        scan = await session.get(AnonymousScan, recorded.scan_id)
-        assert scan is not None and scan.saved_vcard is True
+        await service.record_interaction(
+            recorded.scan_id, InteractionKind.LINK_CLICK, target="linkedin"
+        )
+        await service.record_interaction(recorded.scan_id, InteractionKind.CALL)
+        # Repeat: clients retry and a double-tap must not double-count.
+        await service.record_interaction(recorded.scan_id, InteractionKind.CALL)
+
+        summary = await service.interaction_summary(bob.card_id)  # type: ignore[arg-type]
+        assert summary == {InteractionKind.LINK_CLICK: 1, InteractionKind.CALL: 1}
+
+    async def test_copy_records_the_element_never_the_content(self, session: AsyncSession) -> None:
+        """The line between measuring engagement and reading over someone's
+        shoulder."""
+        bob = await _actor(session, "anon-copy")
+        token = (
+            await CardsService(session, Tenant.user(bob.id)).mint_static_token(
+                bob.card_id  # type: ignore[arg-type]
+            )
+        ).token
+        service = AnonymousScanService(session)
+        recorded = await service.record(token=token, channel=ScanChannel.QR_STATIC)
+
+        await service.record_interaction(recorded.scan_id, InteractionKind.COPY, target="phone")
+        row = (
+            await session.execute(
+                select(ScanInteraction).where(ScanInteraction.scan_id == recorded.scan_id)
+            )
+        ).scalar_one()
+        assert row.target == "phone"
+        assert not hasattr(row, "content")
 
     async def test_reply_is_idempotent(self, session: AsyncSession) -> None:
         """A double submit must not leave the card owner two pending requests
