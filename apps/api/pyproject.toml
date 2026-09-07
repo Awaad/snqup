@@ -10,7 +10,7 @@ requires-python = ">=3.13,<3.14"
 dependencies = [
     "fastapi==0.141.1",
     "uvicorn[standard]==0.52.4",
-    "pydantic==2.13.5",
+    "pydantic[email]==2.13.5",
     "pydantic-settings==2.15.0",
     "sqlalchemy[asyncio]==2.0.52",
     "alembic==1.19.2",
@@ -90,6 +90,10 @@ ignore = [
     "S101",      # assert is fine in tests
     "B008",      # FastAPI Depends() in defaults is the documented pattern
 ]
+# A003 (method shadows a builtin) is deliberately NOT ignored. A method named
+# `list` shadows the builtin inside the class body, so any later `list[...]`
+# annotation resolves to the method and mypy reports "Function ... is not valid
+# as a type" - an error that points nowhere near the cause.
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S", "DTZ"]
@@ -122,6 +126,13 @@ addopts = "-ra --strict-markers --strict-config"
 markers = [
     "integration: needs a real Postgres container",
     "slow: excluded from the fast pre-push run",
+]
+# FastAPIDeprecationWarning subclasses UserWarning, NOT DeprecationWarning, so
+# the usual -W error::DeprecationWarning filter never sees it. ORJSONResponse
+# was deprecated for two releases before anyone noticed. Fail on it.
+filterwarnings = [
+    "error::fastapi.exceptions.FastAPIDeprecationWarning",
+    "error::DeprecationWarning:acme.*",
 ]
 
 [tool.coverage.report]

@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     jwt_public_keys: list[str] = Field(default_factory=list)
 
     sentry_dsn: str | None = None
-
+    
     @property
     def is_production(self) -> bool:
         return self.environment == "production"
