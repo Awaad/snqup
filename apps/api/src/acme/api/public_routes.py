@@ -17,6 +17,8 @@ PUBLIC_PATHS: frozenset[str] = frozenset(
         # scanners have no account, and that is the growth loop, not an edge
         # case (ADR-0008).
         "/v1/scan/{token}",
+        "/v1/scan/{scan_id}/saved",
+        "/v1/scan/{scan_id}/reply",
         "/v1/cards/public/{slug}",
         # Billing webhooks authenticate by signature, not by bearer token.
         "/v1/webhooks/stripe",
