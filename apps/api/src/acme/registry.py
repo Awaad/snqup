@@ -6,6 +6,9 @@ picture and pass while half the schema is unmapped.
 
 WHY IT LIVES HERE AND NOT IN core/
 ----------------------------------
+It was in core/ first, and import-linter correctly rejected that: core/ is
+infrastructure and must not know any domain exists (ADR-0025, contract 2).
+
 This module is not infrastructure. It is a composition root - the one place
 whose job is to know about everything so that nothing else has to. Sitting
 beside core/ and domains/ rather than inside either is what makes that honest,
@@ -18,6 +21,7 @@ Nothing imports this except migrations/env.py and the drift test.
 from acme.domains.billing import models as billing_models
 from acme.domains.cards import models as cards_models
 from acme.domains.connections import models as connections_models
+from acme.domains.crm import models as crm_models
 from acme.domains.events import models as events_models
 from acme.domains.identity import models as identity_models
 from acme.domains.notifications import models as notifications_models
@@ -27,6 +31,7 @@ __all__ = [
     "billing_models",
     "cards_models",
     "connections_models",
+    "crm_models",
     "events_models",
     "identity_models",
     "notifications_models",

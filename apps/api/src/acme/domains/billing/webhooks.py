@@ -43,6 +43,7 @@ PLAN_ENTITLEMENTS: dict[str, dict[str, int | bool]] = {
         "card.qr_customisation": True,
         "card.remove_branding": True,
         "link.page_limit": 5,
+        "link.custom_limit": -1,
         "link.custom_slug": True,
         "analytics.card": True,
         "analytics.link": True,

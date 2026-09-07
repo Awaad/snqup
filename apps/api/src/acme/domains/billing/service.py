@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from acme.domains.billing.enums import EntitlementStatus, SubjectKind
 from acme.domains.billing.models import Entitlement
+from acme.domains.billing.repository import BillingRepository
 
 # The free tier, as code.
 #
@@ -31,6 +32,9 @@ FREE_TIER: dict[str, int | bool] = {
     "card.qr_customisation": False,
     "card.remove_branding": False,
     "link.page_limit": 1,
+    # Two custom links free. Enough for a portfolio and one more, which is the
+    # case that actually comes up; unlimited is the upgrade.
+    "link.custom_limit": 2,
     "link.custom_slug": False,
     "analytics.card": False,
     "analytics.link": False,
@@ -121,6 +125,10 @@ class EntitlementsService:
         if -1 in values:
             return -1
         return max(values)
+
+    async def all_subjects(self) -> set[UUID]:
+        """Every subject holding an entitlement. Input to reconciliation."""
+        return await BillingRepository(self._session).all_entitlement_subjects()
 
     async def limit(self, subject: Subject, key: str) -> int:
         value = await self.check(subject, key)

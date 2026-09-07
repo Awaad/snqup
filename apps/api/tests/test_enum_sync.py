@@ -30,8 +30,10 @@ from acme.domains.connections.enums import (
     InteractionKind,
     ScanChannel,
 )
+from acme.domains.crm.enums import CrmProvider
 from acme.domains.events.enums import EventStaffRole, EventVisibility
 from acme.domains.identity.enums import OrgRole
+from acme.domains.notifications.enums import NotificationKind
 from acme.domains.safety.enums import ReportStatus
 
 pytestmark = pytest.mark.integration
@@ -45,6 +47,8 @@ ENUMS = {
     ("connections", "visibility"): ConnectionVisibility,
     ("anonymous_scans", "channel"): ScanChannel,
     ("scan_interactions", "kind"): InteractionKind,
+    ("notifications", "kind"): NotificationKind,
+    ("crm_connections", "provider"): CrmProvider,
     ("events", "visibility"): EventVisibility,
     ("organization_members", "role"): OrgRole,
     ("event_staff", "role"): EventStaffRole,

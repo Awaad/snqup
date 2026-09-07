@@ -20,7 +20,7 @@ from acme.domains.cards.enums import TokenKind
 from acme.domains.cards.models import CardToken
 from acme.domains.cards.schemas import CardCreate, CardUpdate
 from acme.domains.cards.service import CardsService, TokenResolver, contrast_ratio
-from acme.domains.identity.models import ReservedSlug, User, UserProfile
+from acme.domains.identity.models import User, UserProfile
 
 pytestmark = pytest.mark.integration
 
@@ -132,8 +132,12 @@ class TestDefaultCard:
 
 class TestSlugs:
     async def test_reserved_slug_is_refused(self, session: AsyncSession) -> None:
-        session.add(ReservedSlug(slug="admin", reason="route collision"))
-        await session.flush()
+        """`admin` is seeded by migration 0002, not by this test.
+
+        Seeding in the migration is what makes local and staging behave like
+        production - otherwise `/u/admin` is issuable everywhere except the one
+        environment where it collides with a route.
+        """
         user = await _user(session, "slug@example.com")
 
         with pytest.raises(ApiError) as exc:
@@ -150,13 +154,35 @@ class TestSlugs:
         assert exc.value.code == "CARD_SLUG_TAKEN"
 
     @pytest.mark.parametrize(
-        "slug", ["ab", "-lead", "trail-", "double--hyphen", "Upper", "has space", "x" * 41]
+        "slug",
+        [
+            "ab",
+            "-lead",
+            "trail-",
+            "double--hyphen",
+            "has space",
+            "x" * 41,
+            "under_score",
+            "dot.dot",
+            "emoji-\U0001f600",
+        ],
     )
     async def test_malformed_slugs_are_refused(self, session: AsyncSession, slug: str) -> None:
         user = await _user(session, f"bad-{abs(hash(slug))}@example.com")
         with pytest.raises(ApiError) as exc:
             await _service(session, user).create(CardCreate(display_name="X", slug=slug))
         assert exc.value.code == "CARD_SLUG_INVALID"
+
+    async def test_mixed_case_is_normalised_not_rejected(self, session: AsyncSession) -> None:
+        """Someone typing `Sarah` means `sarah`.
+
+        Rejecting it would be pedantry; silently issuing a different slug from
+        the one they typed would be worse. Normalise and validate.
+        """
+        user = await _user(session, "case@example.com")
+        with pytest.raises(ApiError) as exc:
+            await _service(session, user).create(CardCreate(display_name="X", slug="Admin"))
+        assert exc.value.code == "CARD_SLUG_RESERVED"
 
 
 class TestQrCustomisation:
