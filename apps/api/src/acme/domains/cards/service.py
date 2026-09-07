@@ -241,7 +241,15 @@ class CardsService:
         """The caller's own card, as a value object."""
         return resolved(await self.get(card_id))
 
-    async def list(self) -> list[Card]:
+    async def list_cards(self) -> list[Card]:
+        """Named `list_cards`, not `list`.
+
+        A method called `list` shadows the builtin inside the class body, so
+        any method defined AFTER it that annotates `list[...]` fails to
+        typecheck with "Function ... is not valid as a type" - an error message
+        pointing nowhere near the cause. Latent rather than theoretical: this
+        class had it until a probe proved it.
+        """
         return await self._cards.list(limit=100)
 
     async def update(self, card_id: UUID, payload: CardUpdate) -> Card:
