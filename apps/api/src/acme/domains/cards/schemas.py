@@ -8,9 +8,33 @@ it would break the mapping that makes the generated types trustworthy.
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 
 from acme.domains.cards.enums import CardKind, TokenKind
+
+
+class CardLink(BaseModel):
+    """One custom link.
+
+    `label` is stored, never derived. Auto-titling would mean fetching
+    arbitrary user-supplied URLs server-side, which is an SSRF vector for a
+    cosmetic gain.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    label: str = Field(min_length=1, max_length=60)
+    #: https only. These render on the UGC domain, so a javascript: or data:
+    #: URL here is stored XSS on the highest-risk surface we have (ADR-0008).
+    url: HttpUrl
+    position: int = Field(default=0, ge=0, le=99)
+
+    @field_validator("url")
+    @classmethod
+    def _https_only(cls, value: HttpUrl) -> HttpUrl:
+        if value.scheme != "https":
+            raise ValueError("links must be https")
+        return value
 
 
 class CardFields(BaseModel):
@@ -26,6 +50,10 @@ class CardFields(BaseModel):
     website: str | None = Field(default=None, max_length=500)
     photo_path: str | None = None
     socials: dict[str, str] = Field(default_factory=dict)
+    #: Capped by `link.custom_limit` (2 on the free tier). Socials are
+    #: uncapped: they are identity, and capping them makes a card look broken
+    #: rather than free.
+    links: list[CardLink] = Field(default_factory=list, max_length=50)
     # Paid. Rejected with BILLING_ENTITLEMENT_MISSING when not entitled.
     custom_fields: list[dict[str, str]] = Field(default_factory=list)
     theme: dict[str, str] = Field(default_factory=dict)
@@ -57,6 +85,7 @@ class CardUpdate(BaseModel):
     website: str | None = None
     photo_path: str | None = None
     socials: dict[str, str] | None = None
+    links: list[CardLink] | None = None
     custom_fields: list[dict[str, str]] | None = None
     theme: dict[str, str] | None = None
     qr_style: dict[str, str] | None = None
@@ -79,6 +108,7 @@ class CardOut(BaseModel):
     website: str | None
     photo_path: str | None
     socials: dict[str, str]
+    links: list[CardLink]
     custom_fields: list[dict[str, str]]
     theme: dict[str, str]
     theme_version: int
@@ -106,6 +136,7 @@ class PublicCardOut(BaseModel):
     website: str | None
     photo_path: str | None
     socials: dict[str, str]
+    links: list[CardLink]
     custom_fields: list[dict[str, str]]
     theme: dict[str, str]
 

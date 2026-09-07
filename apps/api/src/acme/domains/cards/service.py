@@ -4,7 +4,6 @@ Owns card lifecycle and token minting. The token rules here are the security
 model of the whole product (ADR-0002) - read TokenKind before changing them.
 """
 
-import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
@@ -26,11 +25,6 @@ from acme.domains.identity.service import IdentityService
 # symmetric exchange (ADR-0002). Long enough to survive queueing for a coffee,
 # short enough that a screenshot is worthless within the hour.
 LIVE_TOKEN_TTL = timedelta(minutes=15)
-
-# Lowercase, digits, hyphen. No leading or trailing hyphen, no doubles.
-# Deliberately narrow: slugs appear in URLs, in QR payloads, and are read aloud.
-SLUG_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-SLUG_MIN, SLUG_MAX = 3, 40
 
 # Minimum contrast ratio between QR foreground and background. Below roughly
 # 3:1 scanning degrades badly in the bad lighting where scanning actually
@@ -138,28 +132,35 @@ class CardsService:
         )
 
     async def _assert_slug_available(self, slug: str) -> None:
-        if not SLUG_MIN <= len(slug) <= SLUG_MAX:
-            raise ApiError(
-                "CARD_SLUG_INVALID",
-                status_code=422,
-                message=f"slug must be {SLUG_MIN}-{SLUG_MAX} characters",
-            )
-        if not SLUG_PATTERN.match(slug):
-            raise ApiError(
-                "CARD_SLUG_INVALID",
-                status_code=422,
-                message="slug may contain lowercase letters, digits and hyphens",
-            )
+        """Format, reserved list, then uniqueness.
 
-        if await self._identity.is_slug_reserved(slug):
-            # Route collisions, brand squatting and profanity. Checked before
-            # the unique index so the caller gets a specific reason rather than
-            # a generic conflict.
-            raise ApiError("CARD_SLUG_RESERVED", status_code=422, message="slug is reserved")
+        Format and the reserved list live in identity, because cards,
+        organizations and events all end up as a URL a stranger reads - `admin`
+        must be refused whichever surface asks. Three copies of that check is
+        how one of them ends up out of date.
+        """
+        await self._identity.assert_slug_available(slug, kind="card")
 
-        existing = await self._cards.by_slug(slug)
-        if existing is not None:
+        if await self._cards.by_slug(slug) is not None:
             raise ApiError("CARD_SLUG_TAKEN", status_code=409, message="slug in use")
+
+    async def _assert_links_allowed(self, count: int) -> None:
+        """Cap custom links, never socials.
+
+        Socials are identity; capping them would make a free card look broken.
+        Custom links are where the link-in-bio value sits, so this is the
+        honest paywall (00-context/pricing.md).
+        """
+        if count == 0:
+            return
+        limit = await self._entitlements.limit(self._subject(), "link.custom_limit")
+        if limit != -1 and count > limit:
+            raise ApiError(
+                "CARD_LINK_LIMIT_REACHED",
+                status_code=403,
+                message=f"plan allows {limit} custom link(s)",
+                details={"limit": limit},
+            )
 
     async def _assert_custom_fields_allowed(self) -> None:
         if not await self._entitlements.allowed(self._subject(), "card.custom_fields"):
@@ -206,11 +207,18 @@ class CardsService:
             )
 
         if payload.slug is not None:
-            await self._assert_slug_available(payload.slug)
+            # Normalised before validation AND before storage, so the slug that
+            # was checked is the slug that gets saved. Someone typing "Sarah"
+            # means "sarah"; storing something different from what they typed
+            # would be worse than rejecting it.
+            normalised_slug = payload.slug.strip().lower()
+            payload = payload.model_copy(update={"slug": normalised_slug})
+            await self._assert_slug_available(normalised_slug)
         if payload.qr_style:
             await self._assert_qr_style_allowed(payload.qr_style)
         if payload.custom_fields:
             await self._assert_custom_fields_allowed()
+        await self._assert_links_allowed(len(payload.links))
 
         # First card is the default whether or not the caller said so: a user
         # with cards but no default has no card to present.
@@ -220,7 +228,12 @@ class CardsService:
 
         # is_default is computed above, not taken from the payload: the first
         # card is the default whether or not the caller asked for it.
-        attributes = payload.model_dump()
+        # mode="json" because HttpUrl and enums are not JSON-serialisable and
+        # `links` is a JSONB column. Without it every card with a link fails on
+        # INSERT with "Object of type HttpUrl is not JSON serializable" - at
+        # the database, not at validation, so the error points at SQL rather
+        # than at the field.
+        attributes = payload.model_dump(mode="json")
         attributes["is_default"] = is_default
         card = self._cards.add(Card(**attributes))
         await self._session.flush()
@@ -257,7 +270,7 @@ class CardsService:
         # exclude_unset, so an absent field is left alone and an explicit null
         # clears it. Without this a PATCH would silently blank every field the
         # client did not send.
-        changes = payload.model_dump(exclude_unset=True)
+        changes = payload.model_dump(exclude_unset=True, mode="json")
 
         if "slug" in changes and changes["slug"] is not None and changes["slug"] != card.slug:
             await self._assert_slug_available(str(changes["slug"]))
@@ -266,6 +279,8 @@ class CardsService:
             await self._assert_qr_style_allowed(changes["qr_style"])
         if changes.get("custom_fields"):
             await self._assert_custom_fields_allowed()
+        if changes.get("links") is not None:
+            await self._assert_links_allowed(len(changes["links"]))
 
         if changes.pop("is_default", False):
             await self._cards.clear_default()
@@ -348,6 +363,23 @@ class CardsService:
         )
         await self._session.flush()
         return IssuedToken(token.token, TokenKind.STATIC, None)
+
+
+class PublicCardService:
+    """Slug lookup for the link-in-bio page.
+
+    NOT tenant-scoped and deliberately not part of CardsService: it runs for a
+    stranger with no account and no tenant, so it must not depend on anything
+    that assumes one.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def by_slug(self, slug: str) -> ResolvedCard | None:
+        stmt = select(Card).where(Card.slug == slug.strip().lower(), Card.deleted_at.is_(None))
+        card = (await self._session.execute(stmt)).scalar_one_or_none()
+        return resolved(card) if card is not None else None
 
 
 class TokenResolver:

@@ -46,6 +46,11 @@ class Card(Base):
     photo_path: Mapped[str | None] = mapped_column(Text)
     socials: Mapped[dict[str, object]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     custom_fields: Mapped[list[object]] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+    # [{label, url, position}]. An array rather than link_1/link_2 columns,
+    # which cannot be reordered or relabelled and force a migration for a
+    # third. Socials stay uncapped because they are identity and capping
+    # them makes a card look broken; custom links are the paywall.
+    links: Mapped[list[dict[str, str]]] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
 
     # USER DATA, versioned. NOT the app design system (ADR-0017). A snapshot
     # taken six months ago must still render with the theme it had, so the

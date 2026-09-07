@@ -250,6 +250,18 @@ CREATE TABLE cards (
     website             text,
     photo_path          text,                       -- object storage key, not a URL
     socials             jsonb NOT NULL DEFAULT '{}'::jsonb,
+    -- Custom links: [{label, url, position}].
+    --
+    -- An array rather than link_1/link_2 columns, which cannot be reordered or
+    -- relabelled and force a migration for a third. Socials are identity and
+    -- stay uncapped - capping them makes a card look broken rather than free -
+    -- while custom links are where the link-in-bio value sits, so that is the
+    -- honest paywall (`link.custom_limit`).
+    --
+    -- These render on the UGC domain, so URLs are validated to https only at
+    -- write time. A javascript: or data: link here is stored XSS on the
+    -- highest-risk surface we have (ADR-0008).
+    links               jsonb NOT NULL DEFAULT '[]'::jsonb,
     custom_fields       jsonb NOT NULL DEFAULT '[]'::jsonb,   -- paid entitlement
 
     -- User data, versioned. NOT the app design system (ADR-0017).
@@ -676,6 +688,68 @@ CREATE INDEX billing_events_unprocessed_idx ON billing_events (received_at)
 -- so a ticket_types table can be added later without touching anything above.
 
 
+-- A connected CRM, per user or per organization.
+--
+-- Two providers at launch, chosen because they are SHAPED DIFFERENTLY: Google
+-- Contacts is a personal address book with no CRM concepts, HubSpot has
+-- contacts, companies, deals and custom properties. An adapter tested against
+-- both is tested against real divergence, so a third provider is an
+-- implementation of a proven interface rather than the thing that reshapes it.
+--
+-- `field_mapping` is per-connection, not per-provider: two HubSpot accounts
+-- put "how we met" in different custom properties, and hardcoding one is how
+-- the integration silently writes into the wrong field.
+CREATE TABLE crm_connections (
+    id                  uuid PRIMARY KEY,
+    user_id             uuid REFERENCES users(id) ON DELETE CASCADE,
+    organization_id     uuid REFERENCES organizations(id) ON DELETE CASCADE,
+    provider            text NOT NULL,
+    -- Encrypted at rest by the application, never plaintext. A CRM token is a
+    -- write credential into someone's customer database.
+    credentials         bytea NOT NULL,
+    field_mapping       jsonb NOT NULL DEFAULT '{}'::jsonb,
+
+    -- A CRM that silently stops syncing is worse than one never connected,
+    -- because the user believes their contacts are safe. These three are what
+    -- let the app say "reconnect" instead of failing quietly.
+    last_sync_at        timestamptz,
+    last_error          text,
+    needs_reauth        boolean NOT NULL DEFAULT false,
+
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    updated_at          timestamptz NOT NULL DEFAULT now(),
+    deleted_at          timestamptz,
+
+    CONSTRAINT crm_connections_provider_check_values CHECK (
+        provider IN ('google_contacts', 'hubspot')
+    ),
+    CONSTRAINT crm_connections_subject CHECK (
+        (user_id IS NOT NULL) <> (organization_id IS NOT NULL)
+    )
+);
+-- One live connection per provider per subject. Two would double-write every
+-- contact and neither would obviously be the wrong one.
+CREATE UNIQUE INDEX crm_connections_user_idx
+    ON crm_connections (user_id, provider)
+    WHERE user_id IS NOT NULL AND deleted_at IS NULL;
+CREATE UNIQUE INDEX crm_connections_org_idx
+    ON crm_connections (organization_id, provider)
+    WHERE organization_id IS NOT NULL AND deleted_at IS NULL;
+
+-- What was pushed where, so a retry does not create a duplicate contact in
+-- someone's CRM - the failure users notice and complain about loudest.
+CREATE TABLE crm_synced_contacts (
+    id                  uuid PRIMARY KEY,
+    crm_connection_id   uuid NOT NULL REFERENCES crm_connections(id) ON DELETE CASCADE,
+    connection_view_id  uuid NOT NULL REFERENCES connection_views(id) ON DELETE CASCADE,
+    external_id         text,
+    synced_at           timestamptz NOT NULL DEFAULT now(),
+    error               text
+);
+CREATE UNIQUE INDEX crm_synced_contacts_unique_idx
+    ON crm_synced_contacts (crm_connection_id, connection_view_id);
+
+
 -- =============================================================================
 -- SAFETY AND COMPLIANCE
 -- =============================================================================
@@ -758,13 +832,21 @@ CREATE INDEX device_tokens_user_idx ON device_tokens (user_id) WHERE revoked_at 
 CREATE TABLE notifications (
     id                  uuid PRIMARY KEY,
     user_id             uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    kind                text NOT NULL,   -- reminder_due | post_event_digest |
-                                         -- reciprocity_nudge | pending_request |
-                                         -- event_announcement
+    kind                text NOT NULL,
     payload             jsonb NOT NULL DEFAULT '{}'::jsonb,
     read_at             timestamptz,
     pushed_at           timestamptz,
-    created_at          timestamptz NOT NULL DEFAULT now()
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    -- Constrained like every other value set. It was free text, which meant a
+    -- typo in a job produced a notification nothing renders and nothing
+    -- complains about - the row exists, the user sees a blank, and the only
+    -- symptom is silence.
+    CONSTRAINT notifications_kind_check_values CHECK (
+        kind IN (
+            'reminder_due', 'post_event_digest', 'reciprocity_nudge',
+            'pending_request', 'event_announcement', 'crm_sync_failed'
+        )
+    )
 );
 CREATE INDEX notifications_user_idx ON notifications (user_id, created_at DESC)
     WHERE read_at IS NULL;
@@ -792,6 +874,8 @@ CREATE TRIGGER subscriptions_updated_at BEFORE UPDATE ON subscriptions
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 CREATE TRIGGER entitlements_updated_at BEFORE UPDATE ON entitlements
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER crm_connections_updated_at BEFORE UPDATE ON crm_connections
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 """
 
 # Reverse creation order so foreign keys unwind cleanly.
@@ -802,6 +886,8 @@ TABLES = [
     "audit_log",
     "blocks",
     "reports",
+    "crm_synced_contacts",
+    "crm_connections",
     "billing_events",
     "entitlements",
     "subscriptions",
