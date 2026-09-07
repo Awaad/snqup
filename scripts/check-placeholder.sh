@@ -33,7 +33,15 @@ done
 # harness (env.py) legitimately imports from the `acme` package, which is a
 # code identifier and therefore fine.
 if [ -d apps/api/migrations/versions ]; then
-  found=$(grep -rni --binary-files=without-match "acme" apps/api/migrations/versions 2>/dev/null || true)
+  # Exclude Python import lines. A migration importing from the `acme`
+  # package (0002 seeds the reserved slug list from acme.data) is a code
+  # identifier, covered by the mechanical rename and costing nothing. What is
+  # expensive is a TABLE or COLUMN named after the product, because migrations
+  # are append-only.
+  found=$(grep -rni --binary-files=without-match "acme" apps/api/migrations/versions 2>/dev/null \
+    | grep -vE ':[[:space:]]*(from|import)[[:space:]]+acme' \
+    | grep -vE '^[^:]+:[0-9]+:[[:space:]]*#' \
+    || true)
   if [ -n "$found" ]; then
     echo "error: placeholder 'acme' in a migration"
     echo "$found" | head -5

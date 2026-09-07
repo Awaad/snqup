@@ -115,6 +115,85 @@ class ConnectionsService:
         return (await self._session.execute(stmt)).scalar_one_or_none()
 
 
+class ConnectionMaintenance:
+    """Bulk operations the job runner needs.
+
+    Lives here because `connections` and `connection_views` belong to this
+    domain. Workers ask for the work to be done; they do not query these tables
+    themselves.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def due_reminders(self, at: datetime, limit: int = 500) -> list[ConnectionView]:
+        stmt = (
+            select(ConnectionView)
+            .where(ConnectionView.reminder_at.is_not(None))
+            .where(ConnectionView.reminder_at <= at)
+            .where(ConnectionView.reminder_done_at.is_(None))
+            .where(ConnectionView.deleted_at.is_(None))
+            .limit(limit)
+        )
+        return list((await self._session.execute(stmt)).scalars())
+
+    async def mark_reminder_sent(self, view: ConnectionView, at: datetime) -> None:
+        """Marked in the SAME transaction as the notification.
+
+        Marking first loses the reminder on a crash; marking after sends it
+        twice on a retry.
+        """
+        view.reminder_done_at = at
+
+    async def pending_older_than(self, at: datetime, limit: int = 200) -> list[Connection]:
+        stmt = (
+            select(Connection)
+            .where(Connection.state == ConnectionState.PENDING)
+            .where(Connection.deleted_at.is_(None))
+            .where(Connection.created_at <= at)
+            .limit(limit)
+        )
+        return list((await self._session.execute(stmt)).scalars())
+
+    async def digest_counts(self, event_id: UUID, user_id: UUID) -> dict[str, int]:
+        """What one person got out of an event.
+
+        `without_notes` is the actionable half - it turns the digest from a
+        summary into a prompt.
+        """
+        views = list(
+            (
+                await self._session.execute(
+                    select(ConnectionView)
+                    .join(Connection, Connection.id == ConnectionView.connection_id)
+                    .where(
+                        Connection.event_id == event_id,
+                        ConnectionView.user_id == user_id,
+                        ConnectionView.deleted_at.is_(None),
+                    )
+                )
+            ).scalars()
+        )
+        return {
+            "connections": len(views),
+            "without_notes": sum(1 for v in views if not v.note),
+        }
+
+    async def purge_for_user(self, user_id: UUID) -> int:
+        """Remove the erased user's own views.
+
+        Their counterpart's views survive - deletion is asymmetric, and one
+        person's erasure must not destroy another's record of a meeting that
+        happened (ADR-0003).
+        """
+        from sqlalchemy import delete
+
+        result = await self._session.execute(
+            delete(ConnectionView).where(ConnectionView.user_id == user_id)
+        )
+        return int(getattr(result, "rowcount", 0) or 0)
+
+
 class EventConnectionStats:
     """Aggregate counts for one event.
 

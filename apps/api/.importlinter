@@ -50,10 +50,46 @@ source_modules =
 forbidden_modules =
     acme.domains
 
+# acme.workers sits at the same level as acme.api: both are entry points that
+# orchestrate domains. It was omitted at first and therefore unconstrained,
+# which let job code import domain models directly - the same mistake the
+# routers made, caught the same way once the layer was declared.
 [importlinter:contract:3]
 name = Layers
 type = layers
 layers =
-    acme.api
+    acme.api | acme.workers
     acme.domains
     acme.core
+
+# Entry points talk to SERVICES, not to internals.
+#
+# The layers contract alone is not enough: it stops a domain importing api, but
+# it happily allows api or workers to reach into a domain's repository or
+# models. That makes "domains may not import each other's internals"
+# half-enforced - the domains behave, and the entry points do whatever they
+# like, which is where the coupling actually accumulates.
+#
+# Schemas ARE importable: they are the domain's declared shape, and a router
+# has to name the type it returns.
+[importlinter:contract:4]
+name = Entry points may not import domain internals
+type = forbidden
+source_modules =
+    acme.api
+    acme.workers
+forbidden_modules =
+    acme.domains.identity.repository
+    acme.domains.cards.repository
+    acme.domains.connections.repository
+    acme.domains.events.repository
+    acme.domains.billing.repository
+    acme.domains.safety.repository
+    acme.domains.identity.models
+    acme.domains.cards.models
+    acme.domains.connections.models
+    acme.domains.events.models
+    acme.domains.billing.models
+    acme.domains.safety.models
+    acme.domains.notifications.models
+allow_indirect_imports = True

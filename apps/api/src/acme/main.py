@@ -11,7 +11,10 @@ from acme.api.middleware import RequestContextMiddleware
 from acme.api.routers.cards import public_router as cards_public_router
 from acme.api.routers.cards import router as cards_router
 from acme.api.routers.connections import router as connections_router
+from acme.api.routers.dashboard import router as dashboard_router
+from acme.api.routers.events import router as events_router
 from acme.api.routers.exchange import router as exchange_router
+from acme.api.routers.privacy import router as privacy_router
 from acme.api.routers.scan import router as scan_router
 from acme.core.auth import JwtVerifier
 from acme.core.cache import create_redis
@@ -88,6 +91,9 @@ def create_app() -> FastAPI:
     app.include_router(exchange_router)
     app.include_router(connections_router)
     app.include_router(scan_router)
+    app.include_router(events_router)
+    app.include_router(dashboard_router)
+    app.include_router(privacy_router)
 
     return app
 

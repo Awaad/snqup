@@ -27,6 +27,7 @@ from acme.domains.cards.enums import CardKind, TokenKind
 from acme.domains.connections.enums import (
     ConnectionState,
     ConnectionVisibility,
+    InteractionKind,
     ScanChannel,
 )
 from acme.domains.events.enums import EventStaffRole, EventVisibility
@@ -43,6 +44,7 @@ ENUMS = {
     ("connections", "state"): ConnectionState,
     ("connections", "visibility"): ConnectionVisibility,
     ("anonymous_scans", "channel"): ScanChannel,
+    ("scan_interactions", "kind"): InteractionKind,
     ("events", "visibility"): EventVisibility,
     ("organization_members", "role"): OrgRole,
     ("event_staff", "role"): EventStaffRole,

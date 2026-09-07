@@ -1,6 +1,6 @@
 """Events service."""
 
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
@@ -64,6 +64,48 @@ class EventsService:
 # Below this cohort size, aggregates identify individuals: "2 of 3 connected"
 # names people. Every organizer-facing number is suppressed under it (ADR-0012).
 MIN_COHORT = 10
+
+
+class EventDigestService:
+    """Finding events whose post-event digest is due.
+
+    Due-ness is computed in the event's LOCAL time, which is why the IANA
+    timezone is validated on create - an invalid name would silently skip the
+    single best retention mechanic in the product.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def due_for_digest(self, at: datetime) -> list[tuple[Event, list[UUID]]]:
+        events = (
+            await self._session.execute(
+                select(Event)
+                .where(Event.deleted_at.is_(None))
+                .where(Event.ends_at <= at)
+                # A short window: this runs often, and an event that ended a
+                # month ago is not suddenly due.
+                .where(Event.ends_at >= at - timedelta(days=3))
+            )
+        ).scalars()
+
+        due: list[tuple[Event, list[UUID]]] = []
+        for event in events:
+            local_end = event.ends_at.astimezone(ZoneInfo(event.timezone))
+            if at < (local_end + timedelta(days=1)).astimezone(UTC):
+                continue
+            attendees = list(
+                (
+                    await self._session.execute(
+                        select(EventAttendee.user_id).where(
+                            EventAttendee.event_id == event.id,
+                            EventAttendee.deleted_at.is_(None),
+                        )
+                    )
+                ).scalars()
+            )
+            due.append((event, attendees))
+        return due
 
 
 class EventAdminService:
