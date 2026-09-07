@@ -5,12 +5,12 @@ from contextlib import asynccontextmanager
 
 import sentry_sdk
 from fastapi import FastAPI
-from fastapi.responses import ORJSONResponse
 
 from acme.api.health import router as health_router
 from acme.api.middleware import RequestContextMiddleware
 from acme.api.routers.cards import public_router as cards_public_router
 from acme.api.routers.cards import router as cards_router
+from acme.api.routers.exchange import router as exchange_router
 from acme.core.auth import JwtVerifier
 from acme.core.cache import create_redis
 from acme.core.config import get_settings
@@ -20,7 +20,7 @@ from acme.core.logging import configure_logging
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     settings = get_settings()
 
     configure_logging(
@@ -67,7 +67,11 @@ def create_app() -> FastAPI:
         # Everything under /v1. Mobile clients cannot be force-updated, so we
         # will run this version for years (contracts/api-conventions.md).
         version="1",
-        default_response_class=ORJSONResponse,
+        # No custom response class. FastAPI serializes directly to JSON bytes
+        # via Pydantic when a return type or response_model is set, which is
+        # faster than routing through one - and ORJSONResponse is deprecated
+        # for exactly that reason. Every endpoint here declares a response
+        # model, so there is nothing to gain from overriding it.
         lifespan=lifespan,
         docs_url=None if settings.is_production else "/docs",
         openapi_url="/openapi.json",
@@ -79,6 +83,7 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(cards_router)
     app.include_router(cards_public_router)
+    app.include_router(exchange_router)
 
     return app
 

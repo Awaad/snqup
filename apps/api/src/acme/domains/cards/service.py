@@ -19,7 +19,7 @@ from acme.domains.billing.service import EntitlementsService, Subject
 from acme.domains.cards.enums import TokenKind
 from acme.domains.cards.models import Card, CardToken
 from acme.domains.cards.repository import CardRepository, CardTokenRepository
-from acme.domains.cards.schemas import CardCreate, CardUpdate
+from acme.domains.cards.schemas import CardCreate, CardUpdate, PublicCardOut
 from acme.domains.identity.service import IdentityService
 
 # Live tokens are short-lived because presenting one IS the consent to a
@@ -37,6 +37,60 @@ SLUG_MIN, SLUG_MAX = 3, 40
 # happens, and it arrives as "your app is broken" rather than as a colour
 # complaint (ADR-0017).
 MIN_QR_CONTRAST = 3.0
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedCard:
+    """What another domain gets when it resolves a card.
+
+    A value object, not the ORM model. Returning `Card` would leak an ORM
+    object across a domain boundary - which import-linter rejects - and would
+    let the caller lazy-load its way into anything reachable from it.
+
+    Carries exactly what the exchange needs: who owns it, which card it is, the
+    immutable snapshot, and the public projection to hand back.
+    """
+
+    card_id: UUID
+    owner_id: UUID
+    snapshot: dict[str, object]
+    public: PublicCardOut
+    token_kind: TokenKind | None = None
+
+
+def build_snapshot(card: Card) -> dict[str, object]:
+    """The immutable record of what was actually exchanged (ADR-0004).
+
+    Without it, someone could present as "Engineer at Acme", exchange with 200
+    people, then rewrite the card to "Recruiter at Competitor" and
+    retroactively change what everyone received.
+
+    Deliberately the PUBLIC projection: a snapshot is what the other person
+    saw, not our internal row.
+    """
+    return {
+        "display_name": card.display_name,
+        "headline": card.headline,
+        "company": card.company,
+        "email": card.email,
+        "phone": card.phone,
+        "website": card.website,
+        "photo_path": card.photo_path,
+        "socials": dict(card.socials),
+        "custom_fields": list(card.custom_fields),
+        "theme": dict(card.theme),
+        "theme_version": card.theme_version,
+    }
+
+
+def resolved(card: Card, token_kind: TokenKind | None = None) -> ResolvedCard:
+    return ResolvedCard(
+        card_id=card.id,
+        owner_id=card.user_id,
+        snapshot=build_snapshot(card),
+        public=PublicCardOut.model_validate(card),
+        token_kind=token_kind,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -183,6 +237,10 @@ class CardsService:
             raise ApiError("CARD_NOT_FOUND", status_code=404)
         return card
 
+    async def get_resolved(self, card_id: UUID) -> ResolvedCard:
+        """The caller's own card, as a value object."""
+        return resolved(await self.get(card_id))
+
     async def list(self) -> list[Card]:
         return await self._cards.list(limit=100)
 
@@ -294,6 +352,11 @@ class TokenResolver:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         self._tokens = CardTokenRepository(session)
+
+    async def resolve_public(self, token: str) -> ResolvedCard:
+        """Resolve to a value object. The cross-domain entry point."""
+        card, found = await self.resolve(token)
+        return resolved(card, found.kind)
 
     async def resolve(self, token: str) -> tuple[Card, CardToken]:
         found = await self._tokens.resolve(token)
