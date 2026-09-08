@@ -1,5 +1,7 @@
 # Handoff: Admin Console
 
+**Status: API built, UI not started.** Every admin endpoint exists and every action writes to `audit_log`. The Next.js console is unbuilt.
+
 **Owns:** `apps/admin/`.
 
 **Status:** This closes a gap. Several runbooks already assume this tooling exists.

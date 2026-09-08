@@ -1,5 +1,7 @@
 # Handoff: Design System
 
+**Status: scaffold only.** `tokens.json` holds placeholder values and is meant to be replaced, not extended. The generation pipeline is the part worth keeping.
+
 **Owns:** `packages/tokens/tokens.json` and the generation pipeline.
 
 **Blocks:** Mobile and Web visual work. Start early.

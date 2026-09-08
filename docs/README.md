@@ -44,6 +44,13 @@ old, treat the runbook as untrusted and verify before relying on it.
 **If a document and the code disagree, the code is wrong or the document is stale.** Fix
 one of them in the same pull request that discovered the gap. Do not leave it.
 
+For anything describing the API specifically, assume the **code** is right: it is built,
+tested and generating the client types the other apps consume.
+
+**`handoff/04-mobile-expo.md` Part 1 is the product brief.** It explains who this is for,
+what the activation metric is, and the three facts that shape every interface decision.
+Anyone building a user-facing surface should read it, not just the mobile team.
+
 ## Status
 
 | Layer | Document | Status |
@@ -56,5 +63,8 @@ one of them in the same pull request that discovered the gap. Do not leave it.
 | Decisions | `adr/` | 0001–0026 accepted |
 | Schema | `schema/schema.sql` | v1 canonical, reviewed 2026-09-05 |
 | Schema | `schema/review-2026-09-05.md` | 8 defects found and fixed |
-| Handoffs | `handoff/` | Ready to start |
+| Handoffs | `handoff/` | Each carries its own status line |
+| Backend | `apps/api/` | **Built.** 32 endpoints, 214 tests |
+| Mobile | `apps/mobile/` | Scaffold. `handoff/04-mobile-expo.md` is the brief |
+| Web | `apps/{web,public,marketing,admin}/` | Scaffold. Separate team |
 | Runbooks | `runbooks/` | Written, **none yet verified** |

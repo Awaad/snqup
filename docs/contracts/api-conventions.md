@@ -56,10 +56,32 @@ The cursor encodes the sort key and the last ID. It is opaque to clients.
 
 **Every mutating request carries `Idempotency-Key`**, a client-generated UUIDv7.
 Stored 24 hours in Valkey. A repeat with the same key returns the original response
-without re-executing.
+without re-executing, with `Idempotency-Replayed: true` so a client can tell a replay from
+a fresh execution.
 
-This is mandatory, not optional: offline retry (ADR-0016) means duplicates are the normal
-case, not an edge case.
+Mandatory, not optional: offline retry (ADR-0016) makes duplicates the normal case.
+
+**Implemented as middleware** (`api/idempotency_middleware.py`), not per endpoint — a
+per-endpoint rule is one someone forgets. Applies to authenticated mutations only;
+webhooks have their own dedup via `billing_events`, and public scan writes have no user to
+scope a key to.
+
+Four behaviours worth knowing:
+
+- **The key is fingerprinted against method, path and body.** Reusing a key for a
+  different request returns `IDEMPOTENCY_KEY_REUSED`, not the first request's response —
+  which would look like success and would not be.
+- **Only 2xx is cached.** A transient 500 stays retryable; caching it would pin a failure
+  for 24 hours with no way past it.
+- **A failure releases the claim**, or one blip blocks every retry of that operation for a
+  day.
+- **It fails OPEN.** Valkey being unavailable degrades duplicate protection rather than
+  stopping people exchanging cards at an event.
+
+**The unique index is not a substitute.** It saves `connections`, where the pair is
+naturally unique. Nothing protects `POST /v1/cards` — a retried creation makes two cards
+and burns the free-tier limit — or a note update, where a retry silently overwrites an
+edit made in between.
 
 ## Errors
 
@@ -88,7 +110,7 @@ across three runtimes (ADR-0024).
 ## Authentication
 
 `Authorization: Bearer <jwt>`. Verified in FastAPI behind the provider adapter
-(`auth/provider.py`). The JWT `sub` maps to `users.auth_subject`.
+(`core/auth.py`). The JWT `sub` maps to `users.auth_subject`.
 
 Public endpoints are explicitly listed in one place, never inferred from the absence of a
 decorator. Default is authenticated; opting out is deliberate and visible.
@@ -101,8 +123,20 @@ Communicated via headers on every response:
 RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset
 ```
 
-`429` returns `Retry-After`. **Scan endpoints fail open with logging** rather than
-blocking (ADR-0007) — a false positive at a live event is worse than an unthrottled hour.
+`429` returns `Retry-After`. **Every limit fails open with logging** (ADR-0007) — a false
+positive at a live event, in front of four hundred people, is worse than an unthrottled
+hour.
+
+Layers, from `handoff/03-backend-api.md`:
+
+| Layer | Scope | Where |
+|---|---|---|
+| Per static token | Tight — 200 resolutions/hour is scraping | `/v1/scan/{token}` |
+| Per IP | Loose. A venue is hundreds of people behind one NAT | anonymous reply form |
+| Per authenticated user | 300 writes/hour. A human scans ~30 cards a day, a script does not | all authenticated mutations |
+
+Reads are deliberately unthrottled: checking your connection list repeatedly at an event
+is normal behaviour, and throttling it punishes the engaged user.
 
 ## Codegen
 

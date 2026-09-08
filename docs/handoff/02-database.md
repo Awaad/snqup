@@ -1,5 +1,7 @@
 # Handoff: Database
 
+**Status: current.** Schema, baseline migration and 227 tests exist. Reviewed 2026-09-05 (`schema/review-2026-09-05.md`), amended by ADR-0027.
+
 **Owns:** `apps/api/migrations/`, `schema/schema.sql`, seed data, the purge job.
 
 **Note:** in a small team this is the Backend team wearing a different hat. It is a

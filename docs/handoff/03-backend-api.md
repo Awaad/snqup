@@ -1,5 +1,7 @@
 # Handoff: Backend API
 
+**Status: BUILT.** 32 endpoints, 227 tests, four import contracts. This document describes the design; the code is the authority where they differ.
+
 **Owns:** `apps/api/`. FastAPI, Python 3.13 (ADR-0021).
 
 **Depends on:** Platform (CI, staging), Database (schema).
@@ -98,7 +100,7 @@ mean multiple sources — the Apple-plus-Stripe case. Conflicts resolve highest-
 `entitlements.check(subject, key)` is the only authorization question about paid features.
 **No code anywhere asks about a payment provider** (ADR-0009).
 
-Webhook handlers (Apple, Stripe) are **idempotent against `billing_events`**. Apple
+Webhook handlers (Apple, Stripe, Google) are **idempotent against `billing_events`**. Apple
 notifications are eventually consistent and occasionally duplicated.
 
 A periodic reconciliation job catches divergence that webhooks missed.

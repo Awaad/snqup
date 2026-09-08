@@ -1,6 +1,6 @@
 # ADR-0009: Dual billing sources, one entitlements model
 
-**Status:** Accepted
+**Status:** Accepted, amended 2026-09-07
 **Date:** 2026-09-04
 
 ## Context
@@ -28,9 +28,28 @@ StoreKit.
 ```
 Apple App Store Server Notifications ─┐
 Stripe webhooks ──────────────────────┼──▶ entitlements ──▶ API authorization
-Google Play RTDN (future) ────────────┘
+Google Play RTDN ─────────────────────┘
 Manual grants (comped pilot partners) ┘
 ```
+
+**AMENDED: Google Play is not future work.** This ADR originally deferred it, which was
+wrong. Android ships at launch (`00-context/product-scope.md`), so Play billing ships at
+launch — deferring RTDN means an Android subscriber pays and receives no entitlements at
+all.
+
+The three providers authenticate in three completely different ways, and that is the part
+worth knowing before touching any of them:
+
+| | Authentication |
+|---|---|
+| Stripe | HMAC over `timestamp.body` |
+| Apple | signed JWS payload, chain rooted in Apple's CA |
+| **Google Play** | **no body signature at all** — a Pub/Sub OIDC bearer token is the only thing authenticating the request |
+
+An RTDN endpoint that skips OIDC verification is a public "grant me a subscription" API
+that behaves identically to a working one. RTDN also carries no event id of its own and
+Pub/Sub is at-least-once by design, so a dedup key is derived from the fields identifying
+the state change.
 
 The `entitlements` table holds: subject (user or organization), entitlement key, value,
 source, source reference, status, expiry.

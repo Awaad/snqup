@@ -1,5 +1,12 @@
 # Shared Contracts
 
+**Status: the backend is built.** 32 endpoints, 227 tests, four enforced import
+contracts. `packages/api-client` is generated from its OpenAPI schema and is the
+authority on request and response shapes. Where a handoff and the code disagree, the code
+is right — open a PR to fix the handoff in the same change that noticed.
+
+Every handoff now carries its own status line. Read it before trusting the rest.
+
 **Every team reads this before their own handoff.** These are the rules that let five teams
 build in parallel without meeting. Breaking one of them breaks someone else's work,
 usually silently.

@@ -1,5 +1,7 @@
 # Handoff: QA and Release
 
+**Status: current.** Nothing has been submitted to either store. The name still blocks App Store Connect and Play Console records.
+
 **Owns:** the release checklist, store submission, the pilot event, activation
 instrumentation.
 

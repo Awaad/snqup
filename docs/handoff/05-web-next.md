@@ -1,5 +1,7 @@
 # Handoff: Web (Next.js)
 
+**Status: not started.** Owned by a separate team. The API it consumes is built — see `packages/api-client` for generated types, and `04-mobile-expo.md` Part 1 for product context that applies equally here.
+
 **Owns:** `apps/web/`, `apps/public/`, `apps/marketing/`.
 
 **Depends on:** Backend (generated client), Design system (tokens).

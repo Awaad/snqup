@@ -1,5 +1,7 @@
 # Handoff: Billing and Entitlements
 
+**Status: BUILT except OAuth credentials.** Three webhook sources (Apple, Stripe, Google Play), entitlements resolver, reconciliation job. Google Play is no longer deferred — see the ADR-0009 amendment.
+
 **Owns:** the entitlements resolver, Apple and Stripe webhook handlers, reconciliation,
 StoreKit integration on mobile, Stripe checkout on web.
 
