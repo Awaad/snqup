@@ -84,8 +84,14 @@ def create_app() -> FastAPI:
         # for exactly that reason. Every endpoint here declares a response
         # model, so there is nothing to gain from overriding it.
         lifespan=lifespan,
+        # ALL THREE disabled in production, not just /docs.
+        # There is no reason to hand an attacker a complete map
+        # of the surface, and CI generates the client from
+        # `acme.scripts.export_openapi` rather than from a running server, so
+        # nothing depends on these being reachable.
         docs_url=None if settings.is_production else "/docs",
-        openapi_url="/openapi.json",
+        redoc_url=None if settings.is_production else "/redoc",
+        openapi_url=None if settings.is_production else "/openapi.json",
     )
 
     # Order matters: RequestContextMiddleware runs FIRST so a replayed
