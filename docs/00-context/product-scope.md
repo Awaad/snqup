@@ -62,6 +62,11 @@ mitigated as follows:
 - Push announcements to attendees
 - Event staff roles separate from organization roles
 
+
+### Additional CRM integrations
+- Google Contacts
+- Hubspot
+
 ### Organizations
 
 - Team and company cards with enforced branding
@@ -106,7 +111,7 @@ These must not require a migration when they land. The columns exist and go unus
 - **Event-scoped discovery** — needs `discoverable_at`, `discovery_prefs` on
   `event_attendees` and `visibility` on `connections` (all present in v1)
 - **Physical card sales** — hardware line, likely higher margin than the subscription
-- **Additional CRM integrations**
+
 
 ## Activation metric
 

@@ -210,6 +210,53 @@ class IdentityService:
             "created_at": profile.created_at.isoformat(),
         }
 
+    async def admin_search(self, *, email: str | None, limit: int = 20) -> list[dict[str, object]]:
+        """Support lookup. Emails MASKED in the result.
+
+        Staff browsing a contact database is exactly the risk this product
+        carries, so a list view identifies an account and no more. Full details
+        need a single-record view, which is audited separately.
+        """
+        stmt = select(User, UserProfile).join(
+            UserProfile, UserProfile.user_id == User.id, isouter=True
+        )
+        if email:
+            stmt = stmt.where(UserProfile.email == email.strip().lower())
+        rows = (await self._session.execute(stmt.limit(limit))).all()
+
+        results: list[dict[str, object]] = []
+        for user, profile in rows:
+            results.append(
+                {
+                    "id": user.id,
+                    "email_masked": _mask_email(profile.email) if profile else "erased",
+                    "display_name": profile.display_name if profile else None,
+                    "deleted_at": (user.deleted_at.isoformat() if user.deleted_at else None),
+                    "purge_after": (user.purge_after.isoformat() if user.purge_after else None),
+                }
+            )
+        return results
+
+    async def existing_subject_ids(self, candidates: set[UUID]) -> set[UUID]:
+        """Which of these ids are a real user or organization.
+
+        Used by the reconciliation job to find orphaned entitlements, which the
+        database cannot catch because subject_id is polymorphic.
+        """
+        if not candidates:
+            return set()
+        users = set(
+            (await self._session.execute(select(User.id).where(User.id.in_(candidates)))).scalars()
+        )
+        orgs = set(
+            (
+                await self._session.execute(
+                    select(Organization.id).where(Organization.id.in_(candidates))
+                )
+            ).scalars()
+        )
+        return users | orgs
+
     async def due_for_purge(self, at: datetime, limit: int = 200) -> list[UUID]:
         stmt = (
             select(User.id)
@@ -290,3 +337,10 @@ class IdentityService:
 # Deliberately narrow: slugs appear in URLs, in QR payloads, and are read aloud.
 SLUG_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 SLUG_MIN, SLUG_MAX = 3, 40
+
+
+def _mask_email(email: str) -> str:
+    local, _, domain = email.partition("@")
+    if not domain:
+        return "***"
+    return f"{local[:2]}***@{domain}"

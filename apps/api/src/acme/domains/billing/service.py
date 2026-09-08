@@ -6,12 +6,17 @@ provider (ADR-0009).
 """
 
 from dataclasses import dataclass
+from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from acme.domains.billing.enums import EntitlementStatus, SubjectKind
+from acme.domains.billing.enums import (
+    EntitlementSource,
+    EntitlementStatus,
+    SubjectKind,
+)
 from acme.domains.billing.models import Entitlement
 from acme.domains.billing.repository import BillingRepository
 
@@ -125,6 +130,42 @@ class EntitlementsService:
         if -1 in values:
             return -1
         return max(values)
+
+    async def grant_manual(
+        self,
+        *,
+        subject_kind: SubjectKind,
+        subject_id: UUID,
+        key: str,
+        value_int: int | None,
+        value_bool: bool | None,
+        expires_at: str,
+        source: EntitlementSource,
+    ) -> None:
+        """Comp an entitlement. Same table and resolver as a paid one.
+
+        An EXPIRY is required. A permanently comped organizer is how the whole
+        meetup segment ends up never paying, and an expiry means it lapses on
+        its own rather than needing someone to remember (00-context/pricing.md).
+        """
+        if key not in FREE_TIER:
+            raise KeyError(f"unknown entitlement key {key!r}")
+        if (value_int is None) == (value_bool is None):
+            raise ValueError("exactly one of value_int or value_bool is required")
+
+        self._session.add(
+            Entitlement(
+                subject_kind=subject_kind,
+                subject_id=subject_id,
+                entitlement_key=key,
+                value_int=value_int,
+                value_bool=value_bool,
+                source=source,
+                status=EntitlementStatus.ACTIVE,
+                expires_at=datetime.fromisoformat(expires_at),
+            )
+        )
+        await self._session.flush()
 
     async def all_subjects(self) -> set[UUID]:
         """Every subject holding an entitlement. Input to reconciliation."""

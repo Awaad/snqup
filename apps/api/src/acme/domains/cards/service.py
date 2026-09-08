@@ -419,3 +419,36 @@ class TokenResolver:
             raise ApiError("TOKEN_NOT_FOUND", status_code=404)
 
         return card, found
+
+
+class AdminCardService:
+    """Card actions taken by staff, not by the owner.
+
+    Deliberately NOT part of CardsService: that one is tenant-scoped and would
+    refuse to touch someone else's card, which is the correct behaviour for a
+    user and the wrong one for a takedown.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+        self._tokens = CardTokenRepository(session)
+
+    async def suspend(self, card_id: UUID) -> None:
+        """Soft-delete the card and revoke its tokens.
+
+        Existing CONNECTIONS are untouched. The snapshot is the counterpart's
+        record of a meeting that happened (ADR-0004), and destroying it would
+        punish someone who did nothing wrong.
+
+        Suspension is deliberately indistinguishable from a card that never
+        existed: TokenResolver returns TOKEN_NOT_FOUND either way
+        (runbooks/abuse-takedown.md).
+        """
+        stmt = select(Card).where(Card.id == card_id, Card.deleted_at.is_(None))
+        card = (await self._session.execute(stmt)).scalar_one_or_none()
+        if card is None:
+            raise ApiError("CARD_NOT_FOUND", status_code=404)
+
+        card.deleted_at = datetime.now(UTC)
+        await self._tokens.revoke_static(card.id)
+        await self._session.flush()

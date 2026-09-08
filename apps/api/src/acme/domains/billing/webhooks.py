@@ -18,6 +18,7 @@ import hashlib
 import hmac
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
@@ -89,6 +90,74 @@ class SubscriptionUpdate:
     plan_key: str
     status: EntitlementStatus
     current_period_end: datetime | None
+
+
+def verify_google_play_token(
+    authorization: str | None, expected_audience: str, verified_email: str
+) -> None:
+    """Google Play RTDN arrives via Pub/Sub push, not a signed body.
+
+    Fundamentally different from Apple and Stripe: there is no signature over
+    the payload. Pub/Sub authenticates with an OIDC token in the Authorization
+    header, and the ONLY thing making the endpoint safe is verifying that
+    token - audience, issuer, and the service account it was issued to.
+
+    An unverified RTDN endpoint is a public "grant me a subscription" API, and
+    it looks identical to a working one until someone finds it.
+
+    Signature verification of the OIDC token itself is done by the caller with
+    Google's JWKS; this checks the claims that JWKS cannot.
+    """
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise ApiError("BILLING_WEBHOOK_INVALID", status_code=401)
+
+
+def parse_google_play_message(body: dict[str, Any]) -> dict[str, Any]:
+    """Unwrap the Pub/Sub envelope.
+
+    RTDN nests the actual notification as base64 inside `message.data`, so a
+    handler written against Apple's or Stripe's flat shape silently sees an
+    empty payload and processes nothing.
+    """
+    import base64
+    import json as _json
+
+    message = body.get("message")
+    if not isinstance(message, dict):
+        raise ApiError(
+            "BILLING_WEBHOOK_INVALID",
+            status_code=400,
+            message="missing Pub/Sub message envelope",
+        )
+    data = message.get("data")
+    if not isinstance(data, str):
+        raise ApiError("BILLING_WEBHOOK_INVALID", status_code=400, message="missing message data")
+    try:
+        decoded = base64.b64decode(data)
+        parsed: dict[str, Any] = _json.loads(decoded)
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise ApiError(
+            "BILLING_WEBHOOK_INVALID", status_code=400, message="undecodable payload"
+        ) from exc
+    return parsed
+
+
+def google_play_external_id(notification: dict[str, Any]) -> str:
+    """A stable id for deduplication.
+
+    RTDN has no event id of its own, so one is derived from the fields that
+    identify the state change. Without it a redelivery - which Pub/Sub does by
+    design, at-least-once - reprocesses the same notification.
+    """
+    sub = notification.get("subscriptionNotification", {})
+    return "|".join(
+        [
+            str(notification.get("packageName", "")),
+            str(sub.get("purchaseToken", "")),
+            str(sub.get("notificationType", "")),
+            str(notification.get("eventTimeMillis", "")),
+        ]
+    )
 
 
 def verify_stripe_signature(payload: bytes, header: str, secret: str) -> None:
