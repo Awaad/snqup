@@ -9,7 +9,7 @@ public because someone forgot a decorator is the failure mode this avoids
 (contracts/api-conventions.md).
 """
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from typing import Annotated
 
 from fastapi import Depends, Request
@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from acme.core.cache import RateLimiter
 from acme.core.errors import ApiError
+from acme.core.jobs import JobQueue
 from acme.core.repository import Tenant
 from acme.domains.identity.service import CurrentUser, IdentityService
 
@@ -27,7 +28,7 @@ from acme.domains.identity.service import CurrentUser, IdentityService
 _bearer = HTTPBearer(auto_error=False)
 
 
-async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
+async def get_session(request: Request) -> AsyncGenerator[AsyncSession]:
     """One session per request, committed on success, rolled back on error.
 
     Committing here rather than in each service is what makes a multi-domain
@@ -62,6 +63,39 @@ def get_rate_limiter(redis: RedisDep) -> RateLimiter:
 RateLimiterDep = Annotated[RateLimiter, Depends(get_rate_limiter)]
 
 
+def get_job_queue(request: Request) -> JobQueue:
+    return JobQueue(request.app.state.job_pool)
+
+
+JobQueueDep = Annotated[JobQueue, Depends(get_job_queue)]
+
+
+# Per-authenticated-user limits. A human scans perhaps thirty cards in a day,
+# not three hundred; a script does the opposite (`handoff/03-backend-api.md`).
+#
+# Applied to WRITES only. Reading your own connection list quickly is normal
+# behaviour at an event, and throttling it would punish the engaged user.
+USER_WRITE_LIMIT = 300
+USER_WRITE_WINDOW_SECONDS = 3600
+
+
+async def enforce_user_write_limit(user: "CurrentUserDep", limiter: RateLimiterDep) -> None:
+    """Ceiling on authenticated writes.
+
+    FAILS OPEN with logging, like every other limit here (ADR-0007). A false
+    positive during a live event, in front of four hundred people, is worse
+    than an unthrottled hour.
+    """
+    await limiter.check(
+        f"user:write:{user.id}",
+        limit=USER_WRITE_LIMIT,
+        window_seconds=USER_WRITE_WINDOW_SECONDS,
+    )
+
+
+UserWriteLimit = Depends(enforce_user_write_limit)
+
+
 async def get_current_user(
     request: Request,
     session: SessionDep,
@@ -78,7 +112,7 @@ async def get_current_user(
     if credentials is None:
         raise ApiError("AUTH_TOKEN_INVALID", status_code=401, message="missing bearer token")
 
-    claims = request.app.state.verifier.verify(credentials.credentials)
+    claims = await request.app.state.verifier.verify(credentials.credentials)
 
     subject = claims.get("sub")
     if not isinstance(subject, str) or not subject:

@@ -81,10 +81,44 @@ async def shutdown(ctx: dict[str, Any]) -> None:
 
 
 class WorkerSettings:
-    """ARQ entry point: `arq acme.workers.settings.WorkerSettings`."""
+    """ARQ entry point: `arq acme.workers.settings.WorkerSettings`.
+
+    RETRY AND TIMEOUT are set explicitly. The defaults are wrong for these
+    jobs in both directions:
+
+      max_tries    A job that fails because Postgres blipped should retry. One
+                   that fails because of a bug should NOT retry forever - it
+                   fills the queue and buries the log line that says why.
+      job_timeout  A digest run across every event can be slow, but a job that
+                   hangs holds a worker slot until restart. A ceiling turns a
+                   hang into a visible failure.
+      keep_result  Results are kept briefly so a failed run is inspectable in
+                   Redis rather than only in logs.
+
+    OVERLAP is prevented by ARQ's cron `job_id` deduplication: a cron job that
+    is still running when its next tick arrives is skipped. Without that,
+    purge_deleted running long would start a second copy that competes for the
+    same rows.
+    """
 
     on_startup = startup
     on_shutdown = shutdown
+
+    #: Three attempts with backoff. Enough for a transient database or network
+    #: failure, few enough that a real bug surfaces instead of looping.
+    max_tries = 3
+    retry_jobs = True
+
+    #: Ten minutes. Every job here is batched, so anything slower is stuck
+    #: rather than busy.
+    job_timeout = 600
+
+    #: Keep failures visible for an hour without letting results accumulate.
+    keep_result = 3600
+
+    #: One worker is enough at this scale, and serial execution means two cron
+    #: jobs cannot contend for the same rows.
+    max_jobs = 1
     functions: ClassVar = [
         send_due_reminders,
         send_post_event_digests,
