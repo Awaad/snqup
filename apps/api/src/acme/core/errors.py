@@ -8,7 +8,7 @@ be displayed to a user.
 from typing import Any
 
 from fastapi import Request
-from fastapi.responses import ORJSONResponse
+from fastapi.responses import JSONResponse
 
 
 class ApiError(Exception):
@@ -27,8 +27,8 @@ class ApiError(Exception):
         super().__init__(code)
 
 
-async def api_error_handler(request: Request, exc: ApiError) -> ORJSONResponse:
-    return ORJSONResponse(
+async def api_error_handler(request: Request, exc: ApiError) -> JSONResponse:
+    return JSONResponse(
         status_code=exc.status_code,
         content={
             "error": {
