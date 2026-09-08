@@ -55,34 +55,40 @@ def _token(private: str, *, sub: str = "user-1", **overrides: object) -> str:
 
 
 class TestJwtVerification:
-    def test_valid_token_is_accepted(self) -> None:
+    """Verification is async because the real verifier fetches JWKS.
+
+    Keeping it sync would force the JWKS verifier to block the event loop on
+    every cache miss, which at startup is every request at once.
+    """
+
+    async def test_valid_token_is_accepted(self) -> None:
         private, public = _keypair()
         verifier = JwtVerifier(public_keys=[public], issuer=ISSUER, audience=AUDIENCE)
-        assert verifier.verify(_token(private))["sub"] == "user-1"
+        assert (await verifier.verify(_token(private)))["sub"] == "user-1"
 
-    def test_expired_token_is_rejected(self) -> None:
+    async def test_expired_token_is_rejected(self) -> None:
         private, public = _keypair()
         verifier = JwtVerifier(public_keys=[public], issuer=ISSUER, audience=AUDIENCE)
         expired = _token(private, exp=datetime.now(UTC) - timedelta(minutes=1))
         with pytest.raises(ApiError) as exc:
-            verifier.verify(expired)
+            await verifier.verify(expired)
         assert exc.value.code == "AUTH_TOKEN_INVALID"
 
-    def test_token_signed_by_another_key_is_rejected(self) -> None:
+    async def test_token_signed_by_another_key_is_rejected(self) -> None:
         """The attack: a well-formed token from the wrong issuer's key."""
         attacker_private, _ = _keypair()
         _, our_public = _keypair()
         verifier = JwtVerifier(public_keys=[our_public], issuer=ISSUER, audience=AUDIENCE)
         with pytest.raises(ApiError):
-            verifier.verify(_token(attacker_private))
+            await verifier.verify(_token(attacker_private))
 
-    def test_wrong_audience_is_rejected(self) -> None:
+    async def test_wrong_audience_is_rejected(self) -> None:
         private, public = _keypair()
         verifier = JwtVerifier(public_keys=[public], issuer=ISSUER, audience=AUDIENCE)
         with pytest.raises(ApiError):
-            verifier.verify(_token(private, aud="some-other-app"))
+            await verifier.verify(_token(private, aud="some-other-app"))
 
-    def test_rotation_accepts_both_keys(self) -> None:
+    async def test_rotation_accepts_both_keys(self) -> None:
         """Why public_keys is a list and not a single value.
 
         Rotation is two-phase: the new key must be ACCEPTED before it starts
@@ -94,8 +100,8 @@ class TestJwtVerification:
         verifier = JwtVerifier(
             public_keys=[old_public, new_public], issuer=ISSUER, audience=AUDIENCE
         )
-        assert verifier.verify(_token(old_private, sub="a"))["sub"] == "a"
-        assert verifier.verify(_token(new_private, sub="b"))["sub"] == "b"
+        assert (await verifier.verify(_token(old_private, sub="a")))["sub"] == "a"
+        assert (await verifier.verify(_token(new_private, sub="b")))["sub"] == "b"
 
 
 class TestIdentityResolution:
