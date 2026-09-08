@@ -1,0 +1,3605 @@
+{
+  "components": {
+    "schemas": {
+      "CardCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "company": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
+          "custom_fields": {
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Custom Fields",
+            "type": "array"
+          },
+          "display_name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "maxLength": 320,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "headline": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Headline"
+          },
+          "is_default": {
+            "default": false,
+            "title": "Is Default",
+            "type": "boolean"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/CardKind",
+            "default": "personal"
+          },
+          "links": {
+            "items": {
+              "$ref": "#/components/schemas/CardLink"
+            },
+            "maxItems": 50,
+            "title": "Links",
+            "type": "array"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "photo_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Photo Path"
+          },
+          "qr_style": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Qr Style",
+            "type": "object"
+          },
+          "slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slug"
+          },
+          "socials": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Socials",
+            "type": "object"
+          },
+          "theme": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Theme",
+            "type": "object"
+          },
+          "website": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Website"
+          }
+        },
+        "required": [
+          "display_name"
+        ],
+        "title": "CardCreate",
+        "type": "object"
+      },
+      "CardKind": {
+        "enum": [
+          "personal",
+          "business",
+          "custom"
+        ],
+        "title": "CardKind",
+        "type": "string"
+      },
+      "CardLink": {
+        "additionalProperties": false,
+        "description": "One custom link.\n\n`label` is stored, never derived. Auto-titling would mean fetching\narbitrary user-supplied URLs server-side, which is an SSRF vector for a\ncosmetic gain.",
+        "properties": {
+          "label": {
+            "maxLength": 60,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "position": {
+            "default": 0,
+            "maximum": 99.0,
+            "minimum": 0.0,
+            "title": "Position",
+            "type": "integer"
+          },
+          "url": {
+            "format": "uri",
+            "maxLength": 2083,
+            "minLength": 1,
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "url"
+        ],
+        "title": "CardLink",
+        "type": "object"
+      },
+      "CardOut": {
+        "properties": {
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "custom_fields": {
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Custom Fields",
+            "type": "array"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "headline": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Headline"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "is_default": {
+            "title": "Is Default",
+            "type": "boolean"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/CardKind"
+          },
+          "links": {
+            "items": {
+              "$ref": "#/components/schemas/CardLink"
+            },
+            "title": "Links",
+            "type": "array"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "photo_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Photo Path"
+          },
+          "qr_style": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Qr Style",
+            "type": "object"
+          },
+          "slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slug"
+          },
+          "socials": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Socials",
+            "type": "object"
+          },
+          "theme": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Theme",
+            "type": "object"
+          },
+          "theme_version": {
+            "title": "Theme Version",
+            "type": "integer"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "website": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Website"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "is_default",
+          "display_name",
+          "headline",
+          "company",
+          "email",
+          "phone",
+          "website",
+          "photo_path",
+          "socials",
+          "links",
+          "custom_fields",
+          "theme",
+          "theme_version",
+          "qr_style",
+          "slug",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "CardOut",
+        "type": "object"
+      },
+      "CardUpdate": {
+        "additionalProperties": false,
+        "description": "Every field optional: a PATCH must not require resending the card.\n\n`None` and \"absent\" are different here. Absent means leave it alone;\nexplicit null means clear it. Pydantic's exclude_unset gives us that\ndistinction, and the service relies on it.",
+        "properties": {
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
+          "custom_fields": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Custom Fields"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "headline": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Headline"
+          },
+          "is_default": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Default"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CardKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "links": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CardLink"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Links"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "photo_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Photo Path"
+          },
+          "qr_style": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qr Style"
+          },
+          "slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slug"
+          },
+          "socials": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Socials"
+          },
+          "theme": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Theme"
+          },
+          "website": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Website"
+          }
+        },
+        "title": "CardUpdate",
+        "type": "object"
+      },
+      "ConnectionListOut": {
+        "description": "Cursor-paginated. Never offset.\n\nOffset pagination on a growing table skips and duplicates rows as new ones\nare inserted, and connections only grow (contracts/api-conventions.md).",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ConnectionOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "ConnectionListOut",
+        "type": "object"
+      },
+      "ConnectionOut": {
+        "description": "One row in the connection list.\n\nCarries the caller's OWN note and tags. The counterpart's are never\nincluded and are not reachable from here - they live in a different row\nwith a different owner.",
+        "properties": {
+          "archived_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived At"
+          },
+          "channel": {
+            "$ref": "#/components/schemas/ScanChannel"
+          },
+          "connection_id": {
+            "format": "uuid",
+            "title": "Connection Id",
+            "type": "string"
+          },
+          "counterpart": {
+            "$ref": "#/components/schemas/CounterpartCard"
+          },
+          "counterpart_changed": {
+            "default": false,
+            "description": "True when the counterpart's live card differs from the snapshot taken at exchange time.",
+            "title": "Counterpart Changed",
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "event_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Id"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "merged_into_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Merged Into Id"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "note_conflict": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Both texts, preserved when two devices edited the note offline. Never silently overwritten (ADR-0016).",
+            "title": "Note Conflict"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "reminder_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reminder At"
+          },
+          "reminder_done_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reminder Done At"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ConnectionState"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "connection_id",
+          "state",
+          "channel",
+          "occurred_at",
+          "event_id",
+          "counterpart",
+          "note",
+          "tags",
+          "reminder_at",
+          "reminder_done_at",
+          "archived_at",
+          "merged_into_id",
+          "created_at"
+        ],
+        "title": "ConnectionOut",
+        "type": "object"
+      },
+      "ConnectionState": {
+        "enum": [
+          "pending",
+          "confirmed",
+          "declined"
+        ],
+        "title": "ConnectionState",
+        "type": "string"
+      },
+      "ConnectionUpdate": {
+        "additionalProperties": false,
+        "description": "Every field optional. Absent means leave alone; null means clear.",
+        "properties": {
+          "archived": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "reminder_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reminder At"
+          },
+          "resolve_note_conflict": {
+            "default": false,
+            "title": "Resolve Note Conflict",
+            "type": "boolean"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags"
+          }
+        },
+        "title": "ConnectionUpdate",
+        "type": "object"
+      },
+      "CounterpartCard": {
+        "additionalProperties": true,
+        "description": "The other person, as they were AT THE TIME (ADR-0004).\n\nRendered from the snapshot, not from their live card. The client shows the\nlive version with a \"details changed since you met\" affordance and reveals\nthis on request.",
+        "properties": {
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "headline": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Headline"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "photo_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Photo Path"
+          },
+          "socials": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Socials",
+            "type": "object"
+          },
+          "website": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Website"
+          }
+        },
+        "title": "CounterpartCard",
+        "type": "object"
+      },
+      "EventCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "ends_at": {
+            "format": "date-time",
+            "title": "Ends At",
+            "type": "string"
+          },
+          "leaderboard_enabled": {
+            "default": false,
+            "title": "Leaderboard Enabled",
+            "type": "boolean"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "starts_at": {
+            "format": "date-time",
+            "title": "Starts At",
+            "type": "string"
+          },
+          "timezone": {
+            "title": "Timezone",
+            "type": "string"
+          },
+          "venue": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Venue"
+          },
+          "visibility": {
+            "$ref": "#/components/schemas/EventVisibility",
+            "default": "unlisted"
+          }
+        },
+        "required": [
+          "name",
+          "starts_at",
+          "ends_at",
+          "timezone"
+        ],
+        "title": "EventCreate",
+        "type": "object"
+      },
+      "EventOut": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "ends_at": {
+            "format": "date-time",
+            "title": "Ends At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "leaderboard_enabled": {
+            "title": "Leaderboard Enabled",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "organization_id": {
+            "format": "uuid",
+            "title": "Organization Id",
+            "type": "string"
+          },
+          "slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slug"
+          },
+          "starts_at": {
+            "format": "date-time",
+            "title": "Starts At",
+            "type": "string"
+          },
+          "timezone": {
+            "title": "Timezone",
+            "type": "string"
+          },
+          "venue": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Venue"
+          },
+          "visibility": {
+            "$ref": "#/components/schemas/EventVisibility"
+          }
+        },
+        "required": [
+          "id",
+          "organization_id",
+          "name",
+          "venue",
+          "code",
+          "slug",
+          "visibility",
+          "starts_at",
+          "ends_at",
+          "timezone",
+          "leaderboard_enabled"
+        ],
+        "title": "EventOut",
+        "type": "object"
+      },
+      "EventStatsOut": {
+        "description": "AGGREGATES ONLY (ADR-0012).\n\nNo field here may reveal which attendee connected with which. That is\nthird-party disclosure of relationship data neither party consented to, and\nevery aggregate is suppressed below a cohort of 10 because \"2 of 3\nconnected\" identifies people.",
+        "properties": {
+          "anonymous_scans": {
+            "title": "Anonymous Scans",
+            "type": "integer"
+          },
+          "attendees": {
+            "title": "Attendees",
+            "type": "integer"
+          },
+          "connected_percentage": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connected Percentage"
+          },
+          "connections": {
+            "title": "Connections",
+            "type": "integer"
+          },
+          "suppressed": {
+            "default": false,
+            "description": "True when the cohort is too small to report safely.",
+            "title": "Suppressed",
+            "type": "boolean"
+          },
+          "unique_connectors": {
+            "title": "Unique Connectors",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "attendees",
+          "connections",
+          "unique_connectors",
+          "connected_percentage",
+          "anonymous_scans"
+        ],
+        "title": "EventStatsOut",
+        "type": "object"
+      },
+      "EventVisibility": {
+        "description": "Three levels, deliberately (ADR-0008).\n\nPUBLIC requires organizer verification, which is both the SEO gate and the\nanti-spam filter: nobody pays to host a phishing page.",
+        "enum": [
+          "private",
+          "unlisted",
+          "public"
+        ],
+        "title": "EventVisibility",
+        "type": "string"
+      },
+      "ExchangeRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "card_id": {
+            "format": "uuid",
+            "title": "Card Id",
+            "type": "string"
+          },
+          "channel": {
+            "$ref": "#/components/schemas/ScanChannel",
+            "default": "qr_live"
+          },
+          "event_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Id"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "occurred_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Occurred At"
+          },
+          "token": {
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "card_id"
+        ],
+        "title": "ExchangeRequest",
+        "type": "object"
+      },
+      "ExchangeResult": {
+        "description": "What the scanner gets back.\n\n`symmetric` tells the client whether the other party received their card\ntoo. It is derived from the TOKEN TYPE, not requested: a static token never\nproduces a symmetric exchange, however the client asks.",
+        "properties": {
+          "card": {
+            "$ref": "#/components/schemas/PublicCardOut"
+          },
+          "connection_id": {
+            "format": "uuid",
+            "title": "Connection Id",
+            "type": "string"
+          },
+          "duplicate": {
+            "default": false,
+            "title": "Duplicate",
+            "type": "boolean"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ConnectionState"
+          },
+          "symmetric": {
+            "title": "Symmetric",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "connection_id",
+          "state",
+          "symmetric",
+          "card",
+          "occurred_at"
+        ],
+        "title": "ExchangeResult",
+        "type": "object"
+      },
+      "GrantRequest": {
+        "additionalProperties": false,
+        "description": "Comped pilot partners. Same table and resolver as a paid entitlement.\n\nAn expiry is REQUIRED. A permanently comped organizer is how the entire\nmeetup segment ends up never paying (00-context/pricing.md).",
+        "properties": {
+          "entitlement_key": {
+            "title": "Entitlement Key",
+            "type": "string"
+          },
+          "expires_at": {
+            "title": "Expires At",
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "subject_id": {
+            "format": "uuid",
+            "title": "Subject Id",
+            "type": "string"
+          },
+          "subject_kind": {
+            "$ref": "#/components/schemas/SubjectKind"
+          },
+          "value_bool": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Bool"
+          },
+          "value_int": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Int"
+          }
+        },
+        "required": [
+          "subject_kind",
+          "subject_id",
+          "entitlement_key",
+          "expires_at",
+          "reason"
+        ],
+        "title": "GrantRequest",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "InteractionKind": {
+        "description": "What a scanner did with a card.\n\nOrdered loosely by strength of signal. VCARD_SAVE and WALLET_ADD mean the\ncontact is kept; the rest mean they acted on it, which is weaker but real -\nand treating those as non-conversions is what the two old booleans got\nwrong.",
+        "enum": [
+          "vcard_save",
+          "wallet_add",
+          "link_click",
+          "copy",
+          "call",
+          "email"
+        ],
+        "title": "InteractionKind",
+        "type": "string"
+      },
+      "InteractionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/InteractionKind"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "maxLength": 60,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "InteractionRequest",
+        "type": "object"
+      },
+      "JoinRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "card_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Card Id"
+          },
+          "code": {
+            "maxLength": 16,
+            "minLength": 4,
+            "title": "Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "title": "JoinRequest",
+        "type": "object"
+      },
+      "MergeRequest": {
+        "additionalProperties": false,
+        "description": "Fold one connection view into another.\n\nMeeting the same person at three events is one contact with three event\ntags, not three contacts. The EDGES stay - each records a real meeting -\nand only the caller's own views are merged.",
+        "properties": {
+          "source_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Source Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "source_ids"
+        ],
+        "title": "MergeRequest",
+        "type": "object"
+      },
+      "PublicCardOut": {
+        "description": "What a STRANGER sees. Deliberately narrower than CardOut.\n\nNo internal id: a UUIDv7 leaks its creation timestamp, and public surfaces\nmust never expose one (ADR-0010). No theme_version, no is_default - those\nare ours, not theirs.",
+        "properties": {
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
+          "custom_fields": {
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Custom Fields",
+            "type": "array"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "headline": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Headline"
+          },
+          "links": {
+            "items": {
+              "$ref": "#/components/schemas/CardLink"
+            },
+            "title": "Links",
+            "type": "array"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "photo_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Photo Path"
+          },
+          "socials": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Socials",
+            "type": "object"
+          },
+          "theme": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Theme",
+            "type": "object"
+          },
+          "website": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Website"
+          }
+        },
+        "required": [
+          "display_name",
+          "headline",
+          "company",
+          "email",
+          "phone",
+          "website",
+          "photo_path",
+          "socials",
+          "links",
+          "custom_fields",
+          "theme"
+        ],
+        "title": "PublicCardOut",
+        "type": "object"
+      },
+      "ReplyRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "format": "email",
+            "title": "Email",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "payload": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Payload",
+            "type": "object"
+          },
+          "website": {
+            "default": "",
+            "title": "Website",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "ReplyRequest",
+        "type": "object"
+      },
+      "ReportStatus": {
+        "enum": [
+          "open",
+          "actioned",
+          "dismissed"
+        ],
+        "title": "ReportStatus",
+        "type": "string"
+      },
+      "RosterEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "format": "email",
+            "title": "Email",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "RosterEntry",
+        "type": "object"
+      },
+      "RosterImport": {
+        "additionalProperties": false,
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/RosterEntry"
+            },
+            "maxItems": 5000,
+            "minItems": 1,
+            "title": "Entries",
+            "type": "array"
+          }
+        },
+        "required": [
+          "entries"
+        ],
+        "title": "RosterImport",
+        "type": "object"
+      },
+      "RosterImportResult": {
+        "properties": {
+          "added": {
+            "title": "Added",
+            "type": "integer"
+          },
+          "skipped": {
+            "title": "Skipped",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "added",
+          "skipped"
+        ],
+        "title": "RosterImportResult",
+        "type": "object"
+      },
+      "ScanChannel": {
+        "description": "How an exchange arrived.\n\nRecorded from v1 even though NFC ships in v1.1: retrofitting loses the\nattribution history, which is how we learn whether NFC or QR is actually\nused.",
+        "enum": [
+          "qr_live",
+          "qr_static",
+          "nfc",
+          "link",
+          "wallet"
+        ],
+        "title": "ScanChannel",
+        "type": "string"
+      },
+      "ScanResult": {
+        "properties": {
+          "card": {
+            "$ref": "#/components/schemas/PublicCardOut"
+          },
+          "scan_id": {
+            "format": "uuid",
+            "title": "Scan Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scan_id",
+          "card"
+        ],
+        "title": "ScanResult",
+        "type": "object"
+      },
+      "SubjectKind": {
+        "enum": [
+          "user",
+          "organization"
+        ],
+        "title": "SubjectKind",
+        "type": "string"
+      },
+      "SuspendRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "confirm_id": {
+            "format": "uuid",
+            "title": "Confirm Id",
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason",
+          "confirm_id"
+        ],
+        "title": "SuspendRequest",
+        "type": "object"
+      },
+      "TokenKind": {
+        "description": "The security model, as a type (ADR-0002).\n\nLIVE produces a symmetric exchange; STATIC never does. Confusing the two is\nthe harvesting vector the whole design exists to close, so it is worth\nhaving the compiler know the difference.",
+        "enum": [
+          "live",
+          "static"
+        ],
+        "title": "TokenKind",
+        "type": "string"
+      },
+      "TokenOut": {
+        "properties": {
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TokenKind"
+          },
+          "token": {
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "kind",
+          "expires_at"
+        ],
+        "title": "TokenOut",
+        "type": "object"
+      },
+      "UserSummary": {
+        "description": "TRUNCATED on purpose.\n\nStaff browsing a contact database is exactly the risk this product carries,\nso a list view shows enough to identify an account and no more. Full\ndetails need a single-record view, which is audited.",
+        "properties": {
+          "deleted_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deleted At"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "email_masked": {
+            "title": "Email Masked",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "purge_after": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purge After"
+          }
+        },
+        "required": [
+          "id",
+          "email_masked",
+          "display_name",
+          "deleted_at",
+          "purge_after"
+        ],
+        "title": "UserSummary",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "WebhookAck": {
+        "description": "Providers retry on non-2xx.\n\nA duplicate is expected and harmless - handlers are idempotent against\nbilling_events - so a repeat is acknowledged rather than errored.",
+        "properties": {
+          "duplicate": {
+            "default": false,
+            "title": "Duplicate",
+            "type": "boolean"
+          },
+          "received": {
+            "default": true,
+            "title": "Received",
+            "type": "boolean"
+          }
+        },
+        "title": "WebhookAck",
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "title": "API",
+    "version": "1"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Health Health Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "operationId": "ready_health_ready_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Ready Health Ready Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Ready",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/v1/admin/billing/unprocessed": {
+      "get": {
+        "description": "Deliveries recorded but never completed.\n\nWithout this the only symptom of a failed handler is a customer who paid\nand has no access, reported by them rather than noticed by us.",
+        "operationId": "unprocessed_billing_events_v1_admin_billing_unprocessed_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Unprocessed Billing Events V1 Admin Billing Unprocessed Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Unprocessed Billing Events",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/cards/{card_id}/suspend": {
+      "post": {
+        "description": "Suspend a card and revoke its tokens (runbooks/abuse-takedown.md).\n\nExisting CONNECTIONS are untouched. The snapshot is the counterpart's\nrecord of a meeting that happened (ADR-0004), and destroying it would\npunish someone who did nothing.\n\nErr toward suspension on the UGC domain: wrongly suspending one card is a\nsupport conversation, while a Safe Browsing listing takes down every link\nin the product.",
+        "operationId": "suspend_card_v1_admin_cards__card_id__suspend_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "card_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Card Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SuspendRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Suspend Card",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/entitlements/grant": {
+      "post": {
+        "description": "Comp an entitlement. Same mechanism as paid, no special-case code.\n\nsource='manual' with an expiry, so it resolves through the ordinary path\nand expires on its own rather than needing anyone to remember.",
+        "operationId": "grant_entitlement_v1_admin_entitlements_grant_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GrantRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Grant Entitlement",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/reports": {
+      "get": {
+        "description": "The moderation queue.\n\nReports survive the thing they are about - subject FKs are SET NULL, not\nCASCADE - so purging a suspended card does not erase the record of why it\nwas suspended.",
+        "operationId": "open_reports_v1_admin_reports_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Open Reports V1 Admin Reports Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Open Reports",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/reports/{report_id}/resolve": {
+      "post": {
+        "operationId": "resolve_report_v1_admin_reports__report_id__resolve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "report_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Report Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "outcome",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/ReportStatus",
+              "default": "actioned"
+            }
+          },
+          {
+            "in": "query",
+            "name": "note",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Note",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Resolve Report",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/users": {
+      "get": {
+        "description": "Look up an account for support.\n\nEmails are masked in the list. The lookup itself is audited: reading who\nexists is an access, not a neutral act.",
+        "operationId": "find_users_v1_admin_users_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "email",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "email",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Email"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/UserSummary"
+                  },
+                  "title": "Response Find Users V1 Admin Users Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Find Users",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/cards": {
+      "get": {
+        "operationId": "list_cards_v1_cards_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CardOut"
+                  },
+                  "title": "Response List Cards V1 Cards Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Cards",
+        "tags": [
+          "cards"
+        ]
+      },
+      "post": {
+        "operationId": "create_card_v1_cards_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CardCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CardOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Card",
+        "tags": [
+          "cards"
+        ]
+      }
+    },
+    "/v1/cards/public/{slug}": {
+      "get": {
+        "description": "The link-in-bio page. Public, guessable and indexable by design.\n\nDistinct from /scan/{token}, which is non-guessable and noindex. Same card,\ntwo access paths with different exposure (ADR-0008).",
+        "operationId": "public_card_v1_cards_public__slug__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicCardOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Public Card",
+        "tags": [
+          "public"
+        ]
+      }
+    },
+    "/v1/cards/{card_id}": {
+      "delete": {
+        "description": "Soft delete. Connections keep their card snapshots (ADR-0004).",
+        "operationId": "delete_card_v1_cards__card_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "card_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Card Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Card",
+        "tags": [
+          "cards"
+        ]
+      },
+      "get": {
+        "operationId": "get_card_v1_cards__card_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "card_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Card Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CardOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Card",
+        "tags": [
+          "cards"
+        ]
+      },
+      "patch": {
+        "operationId": "update_card_v1_cards__card_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "card_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Card Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CardUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CardOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Card",
+        "tags": [
+          "cards"
+        ]
+      }
+    },
+    "/v1/cards/{card_id}/tokens/live": {
+      "post": {
+        "description": "Short-lived token producing a SYMMETRIC exchange.\n\nThe mobile app calls this when the QR screen opens and refreshes on\nforeground. Never export the result: presenting it in-app is what makes\nsymmetric exchange consensual.",
+        "operationId": "mint_live_token_v1_cards__card_id__tokens_live_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "card_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Card Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Mint Live Token",
+        "tags": [
+          "cards"
+        ]
+      }
+    },
+    "/v1/cards/{card_id}/tokens/static": {
+      "get": {
+        "description": "The card's ONE-WAY token, for badges, exports, NFC and Wallet.\n\nIdempotent: returns the existing token rather than issuing a new one, so\nfetching it does not invalidate what is already printed.",
+        "operationId": "get_static_token_v1_cards__card_id__tokens_static_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "card_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Card Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Static Token",
+        "tags": [
+          "cards"
+        ]
+      }
+    },
+    "/v1/cards/{card_id}/tokens/static/rotate": {
+      "post": {
+        "description": "Kill the current static token and issue a new one.\n\nThe remedy when a badge photograph leaks. Everything already printed stops\nresolving, which is the point.",
+        "operationId": "rotate_static_token_v1_cards__card_id__tokens_static_rotate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "card_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Card Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Rotate Static Token",
+        "tags": [
+          "cards"
+        ]
+      }
+    },
+    "/v1/connections": {
+      "get": {
+        "description": "The contact list. NEVER gated.\n\nConnection history is free forever (00-context/pricing.md): hiding contacts\nsomeone already made reads as theft. Export, analytics and the reminder cap\nare the paid surfaces.\n\nCursor-paginated, never offset - offset skips and duplicates rows as new\nconnections are inserted, and this table only grows.",
+        "operationId": "list_connections_v1_connections_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "event_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Event Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tag"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_archived",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Archived",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionListOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Connections",
+        "tags": [
+          "connections"
+        ]
+      }
+    },
+    "/v1/connections/duplicates": {
+      "get": {
+        "description": "Groups of views with the same counterpart.\n\nSurfaced rather than merged automatically: meeting someone at two events is\nlegitimately two records until the user says otherwise.",
+        "operationId": "find_duplicates_v1_connections_duplicates_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "items": {
+                      "format": "uuid",
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "propertyNames": {
+                    "format": "uuid"
+                  },
+                  "title": "Response Find Duplicates V1 Connections Duplicates Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Find Duplicates",
+        "tags": [
+          "connections"
+        ]
+      }
+    },
+    "/v1/connections/{view_id}": {
+      "delete": {
+        "description": "Remove the caller's copy.\n\nAsymmetric by design: the edge survives until both participants delete\ntheir view. My removing a contact must not erase your record of the same\nmeeting.",
+        "operationId": "delete_connection_v1_connections__view_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "view_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "View Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Connection",
+        "tags": [
+          "connections"
+        ]
+      },
+      "get": {
+        "operationId": "get_connection_v1_connections__view_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "view_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "View Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Connection",
+        "tags": [
+          "connections"
+        ]
+      },
+      "patch": {
+        "description": "Notes, tags, reminders and archiving.\n\nAll of it lands on the caller's own view. The counterpart never sees any of\nit, which is the structural guarantee rather than a filtering decision.",
+        "operationId": "update_connection_v1_connections__view_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "view_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "View Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectionUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Connection",
+        "tags": [
+          "connections"
+        ]
+      }
+    },
+    "/v1/connections/{view_id}/merge": {
+      "post": {
+        "description": "Fold duplicates into one contact.\n\nOnly the caller's VIEWS merge. The edges stay, because each records a real\nmeeting that happened, and notes are concatenated rather than discarded.",
+        "operationId": "merge_connections_v1_connections__view_id__merge_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "view_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "View Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MergeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Merge Connections",
+        "tags": [
+          "connections"
+        ]
+      }
+    },
+    "/v1/events/join": {
+      "post": {
+        "description": "Join by code.\n\nRejoining is not an error: someone who taps twice, or who left and came\nback, gets the same result.",
+        "operationId": "join_event_v1_events_join_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JoinRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Join Event",
+        "tags": [
+          "events"
+        ]
+      }
+    },
+    "/v1/events/{event_id}/roster": {
+      "post": {
+        "description": "Upload the registration list.\n\nGives the dashboard a denominator, which is what turns \"400 connections\"\ninto \"78% of your attendees connected\" - the number organizers are actually\nasked about.",
+        "operationId": "import_roster_v1_events__event_id__roster_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RosterImport"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RosterImportResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Import Roster",
+        "tags": [
+          "events"
+        ]
+      }
+    },
+    "/v1/events/{event_id}/stats": {
+      "get": {
+        "description": "AGGREGATES ONLY (ADR-0012).\n\nNo field here reveals which attendee connected with which - that is\nthird-party disclosure of relationship data neither party consented to.\nSuppressed entirely below a cohort of 10, because on a small event any\naggregate identifies individuals however it is phrased.",
+        "operationId": "event_stats_v1_events__event_id__stats_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventStatsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Event Stats",
+        "tags": [
+          "events"
+        ]
+      }
+    },
+    "/v1/events/{event_id}/stream": {
+      "get": {
+        "description": "Live aggregate counts.\n\nAuthorization happens ONCE, before the stream opens - an open connection\ncannot be re-checked, so a revoked staff member keeps the stream until they\ndisconnect. Acceptable because the payload is aggregates only, and it is\ndocumented rather than assumed.\n\nPayload is a full SNAPSHOT, never a delta. That makes a dropped message\nself-correcting: reconnect and you have the truth, with no replay log to\nmaintain.\n\nAGGREGATES ONLY (ADR-0012) - nothing here reveals which attendee connected\nwith which, and everything is suppressed below a cohort of 10.",
+        "operationId": "event_stream_v1_events__event_id__stream_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Event Stream",
+        "tags": [
+          "events"
+        ]
+      }
+    },
+    "/v1/exchanges": {
+      "post": {
+        "description": "Record an exchange.\n\nIdempotent at two levels, and both are needed. `Idempotency-Key` is handled\nby middleware and short-circuits an identical retry before this runs; the\nunique index on (pair, event) catches the same meeting submitted twice with\nDIFFERENT keys, which is two devices syncing the same offline queue.\n\nNeither alone is enough: the header cannot span devices, and the index\ncannot stop a duplicate card creation.\n\nOffline retry makes duplicates the NORMAL case, not an edge case\n(ADR-0016), so a repeat returns the original result rather than an error.\n\nSymmetric or one-way is decided by the TOKEN TYPE, never by the request\n(ADR-0002).",
+        "operationId": "create_exchange_v1_exchanges_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExchangeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExchangeResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Exchange",
+        "tags": [
+          "exchange"
+        ]
+      }
+    },
+    "/v1/organizations/{organization_id}/events": {
+      "post": {
+        "description": "Create an event.\n\nThe creator becomes owner staff, without which the person who made the\nevent could not open its dashboard.",
+        "operationId": "create_event_v1_organizations__organization_id__events_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EventCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Event",
+        "tags": [
+          "events"
+        ]
+      }
+    },
+    "/v1/privacy/account": {
+      "delete": {
+        "description": "Delete this account. In-app, no support contact, no dark patterns.\n\nImmediate: the account is disabled, tokens are revoked, public pages 404.\nAfter the grace period the purge job hard-deletes the profile row, which is\nwhat makes erasure real - soft delete alone is a claim we would not be\nkeeping.\n\nThe `users` anchor survives so counterparties keep their record of a\nmeeting that happened. That position is disclosed in the privacy policy.",
+        "operationId": "delete_my_account_v1_privacy_account_delete",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Delete My Account V1 Privacy Account Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete My Account",
+        "tags": [
+          "privacy"
+        ]
+      }
+    },
+    "/v1/privacy/export": {
+      "get": {
+        "description": "GDPR Article 20. ALWAYS FREE.\n\nCONNECTION_EXPORT_NOT_ENTITLED must never be returned here. The paid\nworkflow export is a different endpoint with a different name in the UI,\nbecause gating a legal right behind a subscription is how a support ticket\nbecomes a regulatory one (ADR-0020).",
+        "operationId": "export_my_data_v1_privacy_export_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Export My Data",
+        "tags": [
+          "privacy"
+        ]
+      }
+    },
+    "/v1/scan/{scan_id}/interactions": {
+      "post": {
+        "description": "What the scanner did with the card.\n\nViews are vanity, but \"conversion\" is broader than a vCard save: tapping\nthe phone number, opening a LinkedIn link or copying an email are all real\nengagement. The client fires this on tel:/mailto:/link taps, on the browser\n`copy` event, and on save and Wallet-add.\n\nIdempotent per (scan, kind, target) - clients retry, and a double-tap must\nnot double-count a conversion.\n\nScreenshots are undetectable, so every figure built on this is a LOWER\nBOUND. Say \"at least\" wherever it surfaces.",
+        "operationId": "record_interaction_v1_scan__scan_id__interactions_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scan_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Scan Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InteractionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Record Interaction",
+        "tags": [
+          "public"
+        ]
+      }
+    },
+    "/v1/scan/{scan_id}/reply": {
+      "post": {
+        "description": "Optionally leave your own details back.\n\nOPTIONAL is the point: requiring this before the vCard download would kill\nthe save flow, which is the one thing this page must get right.\n\nCreates a pending request the card owner sees immediately, and an\ninvitation to claim once the sender installs.",
+        "operationId": "leave_details_v1_scan__scan_id__reply_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scan_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Scan Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Leave Details",
+        "tags": [
+          "public"
+        ]
+      }
+    },
+    "/v1/scan/{token}": {
+      "get": {
+        "description": "Resolve a scanned token. NO AUTHENTICATION, deliberately.\n\nMost scanners have no account, and that is the growth loop rather than an\nedge case (ADR-0008). This is the highest-traffic endpoint in the product.\n\nReturns the public projection only - never the internal card id, which\nwould leak a creation timestamp.",
+        "operationId": "resolve_scan_v1_scan__token__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicCardOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve Scan",
+        "tags": [
+          "public"
+        ]
+      },
+      "post": {
+        "description": "Resolve a scanned token and count the scan.\n\nNo authentication: most scanners have no account, and that is the growth\nloop rather than an edge case (ADR-0008).\n\nRate limiting FAILS OPEN. If the limiter is unavailable the scan proceeds,\nbecause a live event is exactly when the limiter is most loaded and least\nworth trusting.",
+        "operationId": "record_scan_v1_scan__token__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "channel",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/ScanChannel",
+              "default": "qr_static"
+            }
+          },
+          {
+            "in": "query",
+            "name": "event_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Event Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScanResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Record Scan",
+        "tags": [
+          "public"
+        ]
+      }
+    },
+    "/v1/webhooks/apple": {
+      "post": {
+        "description": "Apple App Store Server Notifications V2.\n\nThe body is a signed JWS whose certificate chain roots in Apple's CA.\nSignature verification needs that chain and is done in the service layer;\nthis route handles envelope and idempotency.",
+        "operationId": "apple_webhook_v1_webhooks_apple_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookAck"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Apple Webhook",
+        "tags": [
+          "webhooks"
+        ]
+      }
+    },
+    "/v1/webhooks/google-play": {
+      "post": {
+        "description": "Google Play Real-Time Developer Notifications, via Pub/Sub push.\n\nNOT deferred behind Apple and Stripe: if Android ships at launch then Play\nbilling ships at launch, and an Android subscriber with no entitlements has\npaid for nothing.\n\nThere is NO signature over the body. The OIDC bearer token is the only\nthing authenticating this request, so an endpoint that skips verifying it\nis a public subscription grant that behaves exactly like a working one.\n\nThe notification is base64 inside `message.data`, so a handler written\nagainst Apple's flat shape sees an empty payload and processes nothing.",
+        "operationId": "google_play_webhook_v1_webhooks_google_play_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookAck"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Google Play Webhook",
+        "tags": [
+          "webhooks"
+        ]
+      }
+    },
+    "/v1/webhooks/stripe": {
+      "post": {
+        "description": "Stripe: HMAC over `timestamp.body`.\n\nThe signature covers the payload, so a valid signature cannot be replayed\nonto a different body - which is exactly how someone would grant themselves\na plan.",
+        "operationId": "stripe_webhook_v1_webhooks_stripe_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Stripe-Signature",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Stripe-Signature"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookAck"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stripe Webhook",
+        "tags": [
+          "webhooks"
+        ]
+      }
+    }
+  }
+}
