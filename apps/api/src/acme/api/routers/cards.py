@@ -12,14 +12,14 @@ The domain owns service, repository, models, schemas and enums. The HTTP
 surface that wires them to a request lives here.
 """
 
+import contextlib
 from uuid import UUID
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Request, status
 
 from acme.api.deps import SessionDep, UserTenantDep
 from acme.core.errors import ApiError
-from acme.core.repository import Tenant
-from acme.domains.cards.repository import CardRepository
+from acme.core.idempotency import ResponseCache
 from acme.domains.cards.schemas import (
     CardCreate,
     CardOut,
@@ -27,7 +27,11 @@ from acme.domains.cards.schemas import (
     PublicCardOut,
     TokenOut,
 )
-from acme.domains.cards.service import CardsService, TokenResolver
+from acme.domains.cards.service import (
+    CardsService,
+    PublicCardService,
+    TokenResolver,
+)
 
 router = APIRouter(prefix="/v1", tags=["cards"])
 
@@ -40,7 +44,7 @@ async def create_card(payload: CardCreate, session: SessionDep, tenant: UserTena
 
 @router.get("/cards", response_model=list[CardOut])
 async def list_cards(session: SessionDep, tenant: UserTenantDep) -> list[CardOut]:
-    cards = await CardsService(session, tenant).list()
+    cards = await CardsService(session, tenant).list_cards()
     return [CardOut.model_validate(c) for c in cards]
 
 
@@ -123,16 +127,31 @@ async def resolve_scan(token: str, session: SessionDep) -> PublicCardOut:
 
 
 @public_router.get("/cards/public/{slug}", response_model=PublicCardOut)
-async def public_card(slug: str, session: SessionDep) -> PublicCardOut:
+async def public_card(slug: str, request: Request, session: SessionDep) -> PublicCardOut:
     """The link-in-bio page. Public, guessable and indexable by design.
 
     Distinct from /scan/{token}, which is non-guessable and noindex. Same card,
     two access paths with different exposure (ADR-0008).
     """
-    # Slug lookup serves strangers, so it cannot be tenant-scoped. The tenant
-    # here is a placeholder the query never uses.
-    repo = CardRepository(session, Tenant.user(UUID(int=0)))
-    card = await repo.by_slug(slug)
-    if card is None:
+    # Short-TTL cache. This is the highest-traffic endpoint in the product and
+    # carries a sub-one-second budget on hotel wifi. The TTL is deliberately
+    # short so a card edit appears quickly - this absorbs the burst when a
+    # badge is scanned repeatedly at a stand, rather than acting as a real
+    # cache. Cloudflare does the heavy lifting in front.
+    cache = ResponseCache(request.app.state.redis)
+    cache_key = f"card:slug:{slug.strip().lower()}"
+
+    cached = None
+    with contextlib.suppress(Exception):
+        # FAILS OPEN: a cache outage must not take down the public page.
+        cached = await cache.get(cache_key)
+    if cached is not None:
+        return PublicCardOut.model_validate(cached)
+
+    resolved = await PublicCardService(session).by_slug(slug)
+    if resolved is None:
         raise ApiError("CARD_NOT_FOUND", status_code=404)
-    return PublicCardOut.model_validate(card)
+
+    with contextlib.suppress(Exception):
+        await cache.set(cache_key, resolved.public.model_dump(mode="json"))
+    return resolved.public

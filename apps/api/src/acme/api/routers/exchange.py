@@ -23,10 +23,13 @@ async def create_exchange(
 ) -> ExchangeResult:
     """Record an exchange.
 
-    Idempotent at two levels, and both are needed. The header short-circuits an
-    identical retry; the unique index on (pair, event) catches the case where
-    the same meeting is submitted twice with different keys - two devices
-    syncing the same offline queue, for instance.
+    Idempotent at two levels, and both are needed. `Idempotency-Key` is handled
+    by middleware and short-circuits an identical retry before this runs; the
+    unique index on (pair, event) catches the same meeting submitted twice with
+    DIFFERENT keys, which is two devices syncing the same offline queue.
+
+    Neither alone is enough: the header cannot span devices, and the index
+    cannot stop a duplicate card creation.
 
     Offline retry makes duplicates the NORMAL case, not an edge case
     (ADR-0016), so a repeat returns the original result rather than an error.
