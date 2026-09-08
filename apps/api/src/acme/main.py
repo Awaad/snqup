@@ -7,7 +7,9 @@ import sentry_sdk
 from fastapi import FastAPI
 
 from acme.api.health import router as health_router
+from acme.api.idempotency_middleware import IdempotencyMiddleware
 from acme.api.middleware import RequestContextMiddleware
+from acme.api.routers.admin import router as admin_router
 from acme.api.routers.cards import public_router as cards_public_router
 from acme.api.routers.cards import router as cards_router
 from acme.api.routers.connections import router as connections_router
@@ -16,11 +18,13 @@ from acme.api.routers.events import router as events_router
 from acme.api.routers.exchange import router as exchange_router
 from acme.api.routers.privacy import router as privacy_router
 from acme.api.routers.scan import router as scan_router
-from acme.core.auth import JwtVerifier
+from acme.api.routers.webhooks import router as webhooks_router
+from acme.core.auth import build_verifier
 from acme.core.cache import create_redis
 from acme.core.config import get_settings
 from acme.core.db import create_engine, create_listen_engine, create_session_factory
 from acme.core.errors import ApiError, api_error_handler
+from acme.core.jobs import create_job_pool
 from acme.core.logging import configure_logging
 
 
@@ -51,14 +55,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # Separate direct connection - must NOT be the pooler (ADR-0006).
     app.state.listen_engine = create_listen_engine(settings)
     app.state.redis = create_redis(settings)
-    app.state.verifier = JwtVerifier(
-        public_keys=settings.jwt_public_keys,
-        issuer=settings.jwt_issuer,
-        audience=settings.jwt_audience,
-    )
+    # Separate pool for enqueueing. ARQ's client and our cache client have
+    # different lifecycles, and sharing one means a cache issue takes the job
+    # queue with it.
+    app.state.job_pool = await create_job_pool(str(settings.redis_url))
+    app.state.settings = settings
+    app.state.verifier = build_verifier(settings)
 
     yield
 
+    await app.state.job_pool.aclose()
     await app.state.redis.aclose()
     await app.state.listen_engine.dispose()
     await engine.dispose()
@@ -82,6 +88,10 @@ def create_app() -> FastAPI:
         openapi_url="/openapi.json",
     )
 
+    # Order matters: RequestContextMiddleware runs FIRST so a replayed
+    # response still carries a request id, and so idempotency failures are
+    # logged with one.
+    app.add_middleware(IdempotencyMiddleware)
     app.add_middleware(RequestContextMiddleware)
     app.add_exception_handler(ApiError, api_error_handler)  # type: ignore[arg-type]
 
@@ -94,6 +104,8 @@ def create_app() -> FastAPI:
     app.include_router(events_router)
     app.include_router(dashboard_router)
     app.include_router(privacy_router)
+    app.include_router(webhooks_router)
+    app.include_router(admin_router)
 
     return app
 
