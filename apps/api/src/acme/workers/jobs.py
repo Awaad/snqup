@@ -230,7 +230,12 @@ async def deliver_notifications(session: AsyncSession, now: datetime | None = No
             await notifications.mark_undeliverable(notification, "no eligible channel")
             continue
 
-        subject, body = notifications.render_email(notification)
+        # The RECIPIENT's locale, not the server's. Falling back to English is
+        # deliberate: a notification in the wrong language still says fourteen
+        # people are waiting, while a blank one says nothing.
+        subject, body = notifications.render_email(
+            notification, str(profile.get("locale") or "") or None
+        )
 
         for channel in channels:
             sender = senders[channel]
