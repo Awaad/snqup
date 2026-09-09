@@ -64,7 +64,40 @@ Anyone building a user-facing surface should read it, not just the mobile team.
 | Schema | `schema/schema.sql` | v1 canonical, reviewed 2026-09-05 |
 | Schema | `schema/review-2026-09-05.md` | 8 defects found and fixed |
 | Handoffs | `handoff/` | Each carries its own status line |
-| Backend | `apps/api/` | **Built.** 32 endpoints, 214 tests |
+| Backend | `apps/api/` | **Built.** 47 endpoints, 304 tests |
 | Mobile | `apps/mobile/` | Scaffold. `handoff/04-mobile-expo.md` is the brief |
-| Web | `apps/{web,public,marketing,admin}/` | Scaffold. Separate team |
+| Web | `apps/{web,public,marketing,admin}/` | Scaffold. `handoff/05-web-next.md` is the brief |
 | Runbooks | `runbooks/` | Written, **none yet verified** |
+
+## Where this stands
+
+**The backend is done.** 47 endpoints, 304 tests, 28 ADRs, 29 tables, four enforced import
+contracts and five CI guards. Domain, endpoint and end-to-end reviews are complete.
+
+**Nothing has shipped.** No store submission, no production deploy, and every runbook still
+reads `Last verified: never` — backed by code is not the same as executed against real
+infrastructure, and for `backup-restore` that distinction is the whole point.
+
+### What blocks launch, in order
+
+1. **The product name.** Blocks App Store Connect, Play Console, both OAuth app
+   registrations, and two domain purchases. Everything else here can proceed without it;
+   nothing external can.
+2. **Mobile and web builds.** Both handoffs are written against the live schema and
+   verified against it (`04-mobile-expo.md`, `05-web-next.md`).
+3. **Runbook verification.** Execute each one against real infrastructure once it exists.
+4. **A pilot event.** The whole design assumes things about how people behave in a hall
+   with bad wifi. One real event will correct more assumptions than another month of
+   building.
+
+### Two habits worth keeping
+
+**Documented is not implemented.** Twice, something this repo promised turned out not to
+exist: `updated_at` never moved, and `Idempotency-Key` was accepted and ignored. Both were
+found by looking, not by a test failing. When a document claims a guarantee, check it.
+
+**A green result can mean the check did not run.** Mutation tests reported success five
+times because reformatting had silently swallowed the edit, and the first version of
+`check-doc-counts.sh` passed a document whose test count had been deliberately corrupted, because it
+could not reach the database and skipped silently. Verify that a check can fail before
+trusting that it passed.

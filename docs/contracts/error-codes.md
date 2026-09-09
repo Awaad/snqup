@@ -64,7 +64,9 @@ not in the locale files.
 |---|---|---|
 | `CRM_NOT_CONNECTED` | 404 | No live connection for that provider |
 | `CRM_REAUTH_REQUIRED` | 409 | Credentials expired; the user must reconnect |
-| `CRM_PROVIDER_UNAVAILABLE` | 503 | Provider outage or rate limit. Retry with backoff. |
+| `CRM_PROVIDER_UNAVAILABLE` | 503 | Provider outage, rate limit, or OAuth not configured on this deployment |
+| `CRM_OAUTH_STATE_INVALID` | 400 | State missing, expired, already used, or belonging to another account. This is the CSRF defence — treat it as an attack, not a retry. |
+| `CRM_OAUTH_FAILED` | 400 | Provider rejected the authorization code |
 
 ## Events
 
@@ -84,6 +86,7 @@ not in the locale files.
 |---|---|---|
 | `ORG_NOT_FOUND` | 404 | |
 | `ORG_SLUG_TAKEN` | 409 | |
+| `NOTIFICATION_NOT_FOUND` | 404 | Also returned when it belongs to someone else |
 | `ORG_SEAT_LIMIT_REACHED` | 403 | Enforced at invite time (ADR-0018) |
 | `ORG_DOMAIN_NOT_VERIFIED` | 403 | |
 | `ORG_ROLE_INSUFFICIENT` | 403 | |

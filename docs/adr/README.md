@@ -45,3 +45,4 @@ considered. Short is better than complete. An ADR that nobody reads has failed.
 | 0025 | Backend domain boundaries with enforced import rules | Accepted |
 | 0026 | Client architecture: feature-first, TanStack, separate sync | Accepted |
 | 0027 | Baseline revisions: constrained text, mandatory organizations, content split | Accepted |
+| 0028 | On-device calendar context, not calendar sync | Accepted |

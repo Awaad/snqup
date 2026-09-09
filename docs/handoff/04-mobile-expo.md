@@ -71,6 +71,14 @@ calm evening on the sofa.
 Supabase Auth issues the JWT; the API verifies it against Supabase's JWKS and maps the
 `sub` claim to our user. Send `Authorization: Bearer <jwt>`.
 
+**There is no signup call.** The account is created on the first authenticated request, so
+call `GET /v1/me` immediately after sign-in and a `200` means the account exists. A token
+with no `email` claim is refused — phone and anonymous Supabase sign-in are not supported,
+because every downstream feature assumes an email.
+
+`docs/runbooks/verify-supabase-auth.md` is the procedure for checking this against a real
+project.
+
 **Signing keys rotate.** Do not cache anything derived from them. On
 `AUTH_TOKEN_INVALID`, refresh through Supabase and retry once.
 
@@ -100,9 +108,30 @@ POST   /v1/connections/{view_id}/merge
 DELETE /v1/connections/{view_id}              your copy only
 GET    /v1/connections/duplicates
 
-POST   /v1/events/join                        by code
+POST   /v1/events/join                        by code (authenticated)
 GET    /v1/events/{id}/stats                  aggregates only
 GET    /v1/events/{id}/stream                 SSE, organizer dashboard
+
+GET    /v1/events/public/{slug}                public event page (no auth)
+GET    /v1/events/code/{code}                 resolve a QR from a badge (no auth)
+
+GET    /v1/notifications                      in-app inbox
+POST   /v1/notifications/{id}/read
+POST   /v1/notifications/read-all
+GET    /v1/notifications/preferences          per-kind channel opt-outs
+PUT    /v1/notifications/preferences
+POST   /v1/devices                            register for push
+DELETE /v1/devices/{expo_token}               sign-out, or push turned off
+
+GET    /v1/me                                 who am I. PROVISIONS on first call
+PATCH  /v1/me                                 display name, locale, timezone, consent
+
+GET    /v1/crm/connections                    connected CRMs
+GET    /v1/crm/authorize                      start OAuth (returns a bound state)
+POST   /v1/crm/connections                    complete OAuth
+PUT    /v1/crm/connections/{provider}/mapping field mapping
+POST   /v1/crm/connections/{provider}/sync    queue a sync
+DELETE /v1/crm/connections/{provider}
 
 GET    /v1/privacy/export                     GDPR. ALWAYS FREE.
 DELETE /v1/privacy/account                    in-app deletion
@@ -244,7 +273,8 @@ themes — becomes a dismissible "complete your card" prompt afterwards.
 fix is a shorter flow. Contextual hints on first use of a screen, if at all.
 
 If they arrived via an event deep link, carry the context through and land them already
-joined.
+joined. `GET /v1/events/code/{code}` resolves the code without auth, so the event name can
+be shown on the sign-in screen — "Join DevCon Berlin" converts better than "Sign up".
 
 ## The scan screen is the product
 
@@ -273,6 +303,23 @@ valuable thing we later push to a CRM.
 Make it **skippable in one tap**, and never block the next scan behind it. At an event
 people scan several times in a row, and a modal interrupting that sequence gets dismissed
 reflexively and then permanently.
+
+### Calendar suggestion (ADR-0028)
+
+At the moment of exchange, read the **single** device calendar entry covering *now* and
+offer its title as a pre-filled suggestion. One entry, no searching, nothing stored unless
+the user accepts — and what is stored is an ordinary tag, with no server-side calendar
+state at all.
+
+Do **not** sync the calendar. Read access exposes every meeting title, attendee and
+location a person has, which is an enormous permission in exchange for improving a text
+field. Ask for it after an exchange, like push, not at launch.
+
+**Measure whether it helps.** A session title ("Keynote: Scaling Postgres") is weaker
+context than what the user would type, and the risk is anchoring: they accept the
+suggestion and never write "wants a demo of the reporting", which was the note worth
+having. If accepted suggestions correlate with shorter notes, the feature is subtracting
+value and should be removed.
 
 ## Pending connections
 
