@@ -41,6 +41,7 @@ capability now exists:
 | `event-day` | SSE dashboard, attendee limit check, post-event digest | all present |
 | `secret-rotation` | multi-key JWT accept, JWKS rotation, webhook secret config | all present |
 | `incident-response` | billing reconciliation, stuck-webhook view | all present |
+| `verify-supabase-auth` | provisioning, JWKS, HS256 fallback, deletion | all present |
 
 **Backed by code is not the same as verified.** Every runbook still carries
 `Last verified: never`, because none has been executed end to end against real
