@@ -161,16 +161,23 @@ class NotificationsService:
         return await IdentityService(self._session).set_notification_prefs(user_id, preferences)
 
     @staticmethod
-    def render_email(notification: Notification) -> tuple[str, str]:
-        """Subject and body for one notification.
+    def render_email(notification: Notification, locale: str | None = None) -> tuple[str, str]:
+        """Subject and body, IN THE RECIPIENT'S LOCALE.
 
-        Exposed on the SERVICE because the delivery worker is an entry point,
-        and entry points may not import a domain's models (import contract 4).
-        The worker asks for rendered text rather than being handed a row.
+        The locale argument is the fix for a real bug: this used to render a
+        single English dictionary while its docstring claimed to use the
+        profile locale. A German user received English email.
+
+        Exposed on the SERVICE because the delivery worker is an entry point
+        and may not import a domain's models (import contract 4). The worker
+        asks for rendered text rather than being handed a row.
+
+        For `ar` the body must be wrapped in `dir="rtl"` - see
+        templates.is_rtl().
         """
         from acme.domains.notifications.templates import body_for, subject_for
 
-        return subject_for(notification), body_for(notification)
+        return subject_for(notification, locale), body_for(notification, locale)
 
 
 class DeviceService:
