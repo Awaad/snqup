@@ -22,6 +22,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from acme.core.storage import UploadPurpose
 from acme.domains.billing.enums import EntitlementSource, EntitlementStatus, SubjectKind
 from acme.domains.cards.enums import CardKind, TokenKind
 from acme.domains.connections.enums import (
@@ -31,7 +32,11 @@ from acme.domains.connections.enums import (
     ScanChannel,
 )
 from acme.domains.crm.enums import CrmProvider
-from acme.domains.events.enums import EventStaffRole, EventVisibility
+from acme.domains.events.enums import (
+    EventStaffRole,
+    EventVisibility,
+    RosterSource,
+)
 from acme.domains.identity.enums import OrgRole
 from acme.domains.notifications.enums import NotificationKind
 from acme.domains.safety.enums import ReportStatus
@@ -47,11 +52,13 @@ ENUMS = {
     ("connections", "visibility"): ConnectionVisibility,
     ("anonymous_scans", "channel"): ScanChannel,
     ("scan_interactions", "kind"): InteractionKind,
+    ("uploads", "purpose"): UploadPurpose,
     ("notifications", "kind"): NotificationKind,
     ("crm_connections", "provider"): CrmProvider,
     ("events", "visibility"): EventVisibility,
     ("organization_members", "role"): OrgRole,
     ("event_staff", "role"): EventStaffRole,
+    ("event_roster_entries", "source"): RosterSource,
     ("subscriptions", "source"): EntitlementSource,
     ("subscriptions", "status"): EntitlementStatus,
     ("subscriptions", "subject_kind"): SubjectKind,

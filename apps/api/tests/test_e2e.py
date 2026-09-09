@@ -13,6 +13,7 @@ does something with it afterwards.
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from uuid import UUID
 
 import httpx
 import jwt
@@ -694,7 +695,7 @@ class TestProvisioning:
         someone asked to be deleted, and provisioning would hand them a fresh
         empty profile carrying their old id.
         """
-        subject, headers = await _register(client, session, "erased")
+        _subject, headers = await _register(client, session, "erased")
         await client.request("DELETE", "/v1/privacy/account", headers=headers)
 
         response = await client.get("/v1/me", headers=headers)
@@ -734,3 +735,145 @@ class TestProfile:
         result = await client.patch("/v1/me", json={"consent_marketing": True}, headers=headers)
         assert result.json()["consent_marketing"] is True
         assert result.json()["consent_transactional"] is True
+
+
+class TestEventManagement:
+    """Gaps found by auditing the events service rather than by a failure.
+
+    Nothing had been lost in refactoring — these were never built:
+    events were immutable after creation, `event_content` could not be written
+    despite ADR-0027 splitting it out for exactly that purpose, and nobody
+    could list their own events.
+    """
+
+    async def _event(
+        self, client: httpx.AsyncClient, session: AsyncSession, name: str
+    ) -> tuple[Any, dict[str, str]]:
+        from acme.core.ids import new_id as _new_id
+        from acme.domains.identity.enums import OrgRole
+        from acme.domains.identity.models import Organization, OrganizationMember
+        from acme.domains.identity.service import IdentityService
+
+        subject, headers = await _register(client, session, name)
+        user = await IdentityService(session).current_user(subject)
+        org = Organization(name="Acme", slug=f"acme-{_new_id().hex[:8]}")
+        session.add(org)
+        await session.flush()
+        session.add(OrganizationMember(organization_id=org.id, user_id=user.id, role=OrgRole.OWNER))
+        await session.flush()
+
+        created = await client.post(
+            f"/v1/organizations/{org.id}/events",
+            json={
+                "name": "DevCon",
+                "venue": "Station",
+                "starts_at": datetime.now(UTC).isoformat(),
+                "ends_at": (datetime.now(UTC) + timedelta(hours=8)).isoformat(),
+                "timezone": "Europe/Berlin",
+            },
+            headers=headers,
+        )
+        assert created.status_code == 201, created.text
+        return created.json(), headers
+
+    async def test_an_event_can_be_changed_after_creation(
+        self, client: httpx.AsyncClient, session: AsyncSession
+    ) -> None:
+        """It could not be. Venues move and times shift, and an organizer who
+        typed the wrong date had to create a second event and re-share the
+        code."""
+        event, headers = await self._event(client, session, "upd")
+
+        updated = await client.patch(
+            f"/v1/events/{event['id']}",
+            json={"venue": "Kulturbrauerei"},
+            headers=headers,
+        )
+        assert updated.status_code == 200
+        assert updated.json()["venue"] == "Kulturbrauerei"
+        assert updated.json()["name"] == "DevCon"
+
+    async def test_an_invalid_timezone_is_refused_on_update(
+        self, client: httpx.AsyncClient, session: AsyncSession
+    ) -> None:
+        """An invalid IANA name silently breaks the post-event digest, which
+        fires 24h after ends_at in LOCAL time."""
+        event, headers = await self._event(client, session, "tzupd")
+
+        response = await client.patch(
+            f"/v1/events/{event['id']}",
+            json={"timezone": "Mars/Olympus"},
+            headers=headers,
+        )
+        assert response.status_code == 422
+
+    async def test_ends_before_starts_is_refused_on_update(
+        self, client: httpx.AsyncClient, session: AsyncSession
+    ) -> None:
+        """Checked against the STORED start, not only against a start sent in
+        the same request - otherwise moving just the end date can invert it."""
+        event, headers = await self._event(client, session, "order")
+
+        response = await client.patch(
+            f"/v1/events/{event['id']}",
+            json={"ends_at": (datetime.now(UTC) - timedelta(days=1)).isoformat()},
+            headers=headers,
+        )
+        assert response.status_code == 422
+
+    async def test_going_public_still_needs_verification(
+        self, client: httpx.AsyncClient, session: AsyncSession
+    ) -> None:
+        """Re-checked on every change to public, not only at creation.
+        Otherwise an event created private becomes an indexed public page with
+        no verification at all."""
+        event, headers = await self._event(client, session, "vis")
+
+        response = await client.patch(
+            f"/v1/events/{event['id']}",
+            json={"visibility": "public"},
+            headers=headers,
+        )
+        assert response.status_code == 403
+        assert response.json()["error"]["code"] == "ORG_DOMAIN_NOT_VERIFIED"
+
+    async def test_event_content_can_be_written_and_appears_publicly(
+        self, client: httpx.AsyncClient, session: AsyncSession
+    ) -> None:
+        """`event_content` was split from `events` in ADR-0027 and nothing
+        could write it - the split existed and the feature did not."""
+        from acme.domains.events.models import Event
+
+        event, headers = await self._event(client, session, "content")
+
+        result = await client.put(
+            f"/v1/events/{event['id']}/content",
+            json={
+                "body": {"type": "doc", "content": []},
+                "banner_path": "event_banner/x/y.jpg",
+            },
+            headers=headers,
+        )
+        assert result.status_code == 204
+
+        row = await session.get(Event, UUID(event["id"]))
+        assert row is not None
+        row.slug = "devcon-content"
+        row.visibility = "unlisted"
+        await session.flush()
+
+        page = await client.get("/v1/events/public/devcon-content")
+        assert page.status_code == 200
+        assert page.json()["banner_path"] == "event_banner/x/y.jpg"
+
+    async def test_a_user_can_list_their_own_events(
+        self, client: httpx.AsyncClient, session: AsyncSession
+    ) -> None:
+        """Organizing and attending are two lists, because the same person is
+        often in both and merging them loses which is which."""
+        _, headers = await self._event(client, session, "mine")
+
+        response = await client.get("/v1/events", headers=headers)
+        assert response.status_code == 200
+        assert [e["name"] for e in response.json()["organizing"]] == ["DevCon"]
+        assert response.json()["attending"] == []

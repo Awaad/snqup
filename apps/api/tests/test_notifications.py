@@ -1,5 +1,9 @@
 """Notification delivery.
 
+This whole layer was missing: jobs wrote `notifications` rows, nothing sent
+them, and no endpoint could read them. `RESEND_API_KEY` sat in `.env.example`
+and no code read it.
+
 The routing tests matter most. "Send everything everywhere" is how an app gets
 muted, and a muted app loses the reminder feature — which is the main reason
 this product gets opened between events.
