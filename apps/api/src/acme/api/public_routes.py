@@ -29,6 +29,12 @@ PUBLIC_PATHS: frozenset[str] = frozenset(
         "/v1/scan/{scan_id}/interactions",
         "/v1/scan/{scan_id}/reply",
         "/v1/cards/public/{slug}",
+        # The public event page. Anonymous-first for the same reason as the
+        # scan page: most people who see an organizer's link do not have the
+        # app, and requiring a signup first loses them.
+        "/v1/events/public/{slug}",
+        "/v1/events/code/{code}",
+        "/v1/events/public/{slug}/register",
         # Billing webhooks authenticate by signature, not by bearer token.
         # All three authenticate by their own mechanism rather than a bearer
         # token: HMAC (Stripe), signed JWS (Apple), Pub/Sub OIDC (Google Play).
