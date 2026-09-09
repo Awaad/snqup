@@ -24,6 +24,7 @@ from acme.domains.connections import models as connections_models
 from acme.domains.crm import models as crm_models
 from acme.domains.events import models as events_models
 from acme.domains.identity import models as identity_models
+from acme.domains.media import models as media_models
 from acme.domains.notifications import models as notifications_models
 from acme.domains.safety import models as safety_models
 
@@ -34,6 +35,7 @@ __all__ = [
     "crm_models",
     "events_models",
     "identity_models",
+    "media_models",
     "notifications_models",
     "safety_models",
 ]

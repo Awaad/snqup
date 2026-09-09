@@ -19,6 +19,7 @@ from acme.api.routers.events import public_router as events_public_router
 from acme.api.routers.events import router as events_router
 from acme.api.routers.exchange import router as exchange_router
 from acme.api.routers.me import router as me_router
+from acme.api.routers.media import router as media_router
 from acme.api.routers.notifications import router as notifications_router
 from acme.api.routers.privacy import router as privacy_router
 from acme.api.routers.scan import router as scan_router
@@ -116,6 +117,7 @@ def create_app() -> FastAPI:
     app.include_router(dashboard_router)
     app.include_router(privacy_router)
     app.include_router(me_router)
+    app.include_router(media_router)
     app.include_router(notifications_router)
     app.include_router(crm_router)
     app.include_router(webhooks_router)
