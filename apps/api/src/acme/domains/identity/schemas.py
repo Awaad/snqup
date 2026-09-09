@@ -23,6 +23,9 @@ class ProfileOut(BaseModel):
     locale: str
     consent_marketing: bool
     consent_transactional: bool
+    #: IANA name. Quiet hours for push are computed in LOCAL time, and without
+    #: this the server falls back to UTC, which is wrong for most of the world.
+    timezone: str | None
     created_at: datetime
 
 
@@ -35,6 +38,7 @@ class ProfileUpdate(BaseModel):
     #: GDPR requires opt-in for marketing, and one combined flag means either
     #: spamming people or being unable to send a password reset.
     consent_marketing: bool | None = None
+    timezone: str | None = Field(default=None, max_length=64)
 
 
 class OrganizationCreate(BaseModel):

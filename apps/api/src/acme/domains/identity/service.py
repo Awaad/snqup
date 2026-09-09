@@ -14,6 +14,7 @@ from acme.core.ids import new_id
 from acme.domains.identity.enums import OrgRole
 
 if TYPE_CHECKING:
+    from acme.domains.identity.domains import ChallengeInstructions
     from acme.domains.identity.schemas import ProfileOut, ProfileUpdate
 from acme.domains.identity.models import (
     DomainVerification,
@@ -294,6 +295,7 @@ class IdentityService:
             return {}
         return {
             "email": profile.email,
+            "locale": profile.locale,
             "timezone": profile.timezone,
             "notification_prefs": dict(profile.notification_prefs),
             "consent_transactional": profile.consent_transactional,
@@ -412,6 +414,128 @@ class IdentityService:
         counterparty's record of a meeting that happened.
         """
         await self._session.execute(delete(UserProfile).where(UserProfile.user_id == user_id))
+        await self._session.flush()
+
+    async def start_domain_verification(
+        self, organization_id: UUID, raw_domain: str
+    ) -> tuple[DomainVerification, "ChallengeInstructions"]:
+        """Create or reissue a challenge.
+
+        Reissues rather than duplicating: a user who lost the instructions
+        should get the SAME token back, not a second pending row and a second
+        record to publish.
+        """
+        from acme.domains.identity.domains import (
+            instructions_for,
+            new_challenge_token,
+            normalise_domain,
+        )
+
+        domain = normalise_domain(raw_domain)
+        if not domain or "." not in domain:
+            raise ApiError(
+                "VALIDATION_FAILED",
+                status_code=422,
+                message="that does not look like a domain",
+            )
+
+        existing = (
+            await self._session.execute(
+                select(DomainVerification).where(
+                    DomainVerification.organization_id == organization_id,
+                    DomainVerification.domain == domain,
+                )
+            )
+        ).scalar_one_or_none()
+
+        if existing is not None:
+            return existing, instructions_for(domain, existing.challenge_token)
+
+        verification = DomainVerification(
+            organization_id=organization_id,
+            domain=domain,
+            challenge_token=new_challenge_token(),
+        )
+        self._session.add(verification)
+        await self._session.flush()
+        return verification, instructions_for(domain, verification.challenge_token)
+
+    async def check_domain_verification(
+        self, organization_id: UUID, raw_domain: str
+    ) -> DomainVerification:
+        """Look up the TXT record now.
+
+        Called when the user says they have published it. Failure is NOT an
+        error state: DNS propagation is slow and the normal experience is
+        checking too early, so the row records the attempt and the user tries
+        again.
+        """
+        from acme.domains.identity.domains import (
+            MAX_CHECK_ATTEMPTS,
+            check_txt_record,
+            normalise_domain,
+        )
+
+        domain = normalise_domain(raw_domain)
+        verification = (
+            await self._session.execute(
+                select(DomainVerification).where(
+                    DomainVerification.organization_id == organization_id,
+                    DomainVerification.domain == domain,
+                )
+            )
+        ).scalar_one_or_none()
+        if verification is None:
+            raise ApiError("ORG_DOMAIN_NOT_VERIFIED", status_code=404)
+
+        if verification.check_attempts >= MAX_CHECK_ATTEMPTS:
+            raise ApiError(
+                "ORG_DOMAIN_NOT_VERIFIED",
+                status_code=429,
+                message="too many attempts; start the verification again",
+            )
+
+        verification.last_checked_at = datetime.now(UTC)
+        if await check_txt_record(domain, verification.challenge_token):
+            verification.verified_at = datetime.now(UTC)
+            verification.last_error = None
+        else:
+            verification.check_attempts += 1
+            verification.last_error = "TXT record not found or does not match"
+        await self._session.flush()
+        return verification
+
+    async def domains_due_for_recheck(
+        self, older_than: datetime, limit: int = 100
+    ) -> list[DomainVerification]:
+        """Verified domains that have not been re-checked recently.
+
+        A domain can be transferred, expire or be sold. A verification that is
+        true forever eventually certifies someone else's domain as ours, and
+        the badge and the indexed public page go with it.
+        """
+        stmt = (
+            select(DomainVerification)
+            .where(DomainVerification.verified_at.is_not(None))
+            .where(
+                (DomainVerification.last_checked_at.is_(None))
+                | (DomainVerification.last_checked_at < older_than)
+            )
+            .limit(limit)
+        )
+        return list((await self._session.execute(stmt)).scalars())
+
+    async def revoke_domain_verification(
+        self, verification: DomainVerification, reason: str
+    ) -> None:
+        """The record is gone. Withdraw the verification.
+
+        Not deleted: support needs to see that it WAS verified and when it
+        stopped, because the first question after a badge disappears is what
+        changed.
+        """
+        verification.verified_at = None
+        verification.last_error = reason
         await self._session.flush()
 
     async def has_verified_domain(self, organization_id: UUID) -> bool:

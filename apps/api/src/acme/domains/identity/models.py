@@ -85,6 +85,15 @@ class UserProfile(Base):
     consent_transactional: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
     consent_marketing: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     consent_policy_version: Mapped[str | None] = mapped_column(Text)
+    # {"reminder_due": {"push": true, "email": false}}. JSONB rather than a
+    # column per kind, because kinds are added often and a migration per kind
+    # is the friction that leads to shipping one with no way to turn it off.
+    notification_prefs: Mapped[dict[str, dict[str, bool]]] = mapped_column(
+        JSONB, server_default=text("'{}'::jsonb")
+    )
+    # IANA name. A reminder at 3am is worse than no reminder, and the server
+    # cannot know local time without this.
+    timezone: Mapped[str | None] = mapped_column(Text)
 
     birth_year: Mapped[int | None] = mapped_column(SmallInteger)
 
@@ -182,7 +191,15 @@ class DomainVerification(Base):
     )
     user_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     domain: Mapped[str] = mapped_column(CIText())
+    # Random per verification, never derived: a predictable token means anyone
+    # can work out what to publish and claim a domain they do not control.
+    challenge_token: Mapped[str] = mapped_column(Text)
     verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Re-checked periodically. A domain can be transferred or sold, and a
+    # verification that is true forever eventually certifies someone else's.
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    check_attempts: Mapped[int] = mapped_column(SmallInteger, server_default=text("0"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
