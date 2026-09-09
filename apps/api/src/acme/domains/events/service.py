@@ -1,497 +1,579 @@
-"""Connections service.
+"""Events service."""
 
-Owns the `connections` and `connection_views` tables. The exchange domain
-orchestrates but does not write here directly - that would put the same tables
-under two owners (ADR-0025).
-"""
-
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from acme.core.errors import ApiError
-from acme.core.ids import new_id
-from acme.core.repository import Tenant
 from acme.domains.billing.service import EntitlementsService, Subject
-from acme.domains.connections.enums import ConnectionState, ScanChannel
-from acme.domains.connections.models import Connection, ConnectionView
-from acme.domains.connections.repository import (
-    ConnectionEdgeRepository,
-    ConnectionViewRepository,
+from acme.domains.connections.service import EventConnectionStats
+from acme.domains.events.enums import (
+    EventStaffRole,
+    EventVisibility,
+    RosterSource,
 )
-from acme.domains.connections.schemas import (
-    ConnectionListOut,
-    ConnectionOut,
-    ConnectionUpdate,
-    CounterpartCard,
+from acme.domains.events.models import (
+    Event,
+    EventAttendee,
+    EventContent,
+    EventRosterEntry,
+    EventStaff,
 )
+from acme.domains.events.repository import EventRepository
+from acme.domains.events.schemas import (
+    EventContentUpdate,
+    EventCreate,
+    EventStatsOut,
+    EventUpdate,
+    PublicEventOut,
+)
+from acme.domains.identity.service import IdentityService
 
 
-def order_pair(a: UUID, b: UUID) -> tuple[UUID, UUID]:
-    """Canonical ordering.
-
-    `connections_ordered` is a CHECK constraint, so an unordered insert is a
-    database error rather than a silently duplicated pair. Ordering here means
-    the same two people always produce the same row regardless of who scanned.
-    """
-    return (a, b) if a < b else (b, a)
-
-
-class ConnectionsService:
+class EventsService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def find_existing(
-        self, user_a: UUID, user_b: UUID, event_id: UUID | None
-    ) -> Connection | None:
-        low, high = order_pair(user_a, user_b)
-        stmt = select(Connection).where(
-            Connection.user_low_id == low,
-            Connection.user_high_id == high,
-            Connection.deleted_at.is_(None),
-        )
-        # NULL event_id is a distinct scope, not a wildcard: meeting the same
-        # person at an event and again outside one is two connections, matching
-        # the two partial unique indexes (ADR-0003).
-        stmt = (
-            stmt.where(Connection.event_id == event_id)
-            if event_id is not None
-            else stmt.where(Connection.event_id.is_(None))
-        )
-        return (await self._session.execute(stmt)).scalar_one_or_none()
+    async def window_for_attendee(self, event_id: UUID, user_id: UUID) -> tuple[datetime, datetime]:
+        """The event's time window, if this user is actually an attendee.
 
-    async def record(
-        self,
-        *,
-        user_a: UUID,
-        card_a_id: UUID,
-        snapshot_a: dict[str, object],
-        user_b: UUID,
-        card_b_id: UUID,
-        snapshot_b: dict[str, object],
-        channel: ScanChannel,
-        occurred_at: datetime,
-        event_id: UUID | None,
-        state: ConnectionState,
-    ) -> Connection:
-        """Write the edge and both views, in one call.
-
-        Both views are always created, even for a one-way static scan. The
-        owner's view is what surfaces the pending request; without it they
-        would have no record that anyone scanned them.
+        Membership is checked here rather than trusted from the request. A
+        client that could tag any exchange with any event id could inflate
+        another organizer's numbers, and those numbers are what the organizer
+        pays for.
         """
-        low, high = order_pair(user_a, user_b)
-        low_is_a = low == user_a
-
-        connection = Connection(
-            id=new_id(),
-            user_low_id=low,
-            user_high_id=high,
-            card_low_id=card_a_id if low_is_a else card_b_id,
-            card_high_id=card_b_id if low_is_a else card_a_id,
-            card_low_snapshot=snapshot_a if low_is_a else snapshot_b,
-            card_high_snapshot=snapshot_b if low_is_a else snapshot_a,
-            channel=channel,
-            occurred_at=occurred_at,
-            event_id=event_id,
-            state=state,
+        stmt = (
+            select(Event)
+            .join(
+                EventAttendee,
+                (EventAttendee.event_id == Event.id)
+                & (EventAttendee.user_id == user_id)
+                & (EventAttendee.deleted_at.is_(None)),
+            )
+            .where(Event.id == event_id, Event.deleted_at.is_(None))
         )
-        self._session.add(connection)
-        await self._session.flush()
+        event = (await self._session.execute(stmt)).scalar_one_or_none()
+        if event is None:
+            # Same code whether the event does not exist or the user is not an
+            # attendee: distinguishing them confirms an event exists to someone
+            # with no access to it.
+            raise ApiError("EVENT_NOT_FOUND", status_code=404)
+        return event.starts_at, event.ends_at
 
-        for user_id in (low, high):
-            self._session.add(ConnectionView(connection_id=connection.id, user_id=user_id))
-        await self._session.flush()
-        return connection
+    async def content_for(self, event_id: UUID) -> EventContent | None:
+        """Presentational content, read through the service (ADR-0027).
 
-    async def view_for(self, connection_id: UUID, user_id: UUID) -> ConnectionView | None:
-        stmt = select(ConnectionView).where(
-            ConnectionView.connection_id == connection_id,
-            ConnectionView.user_id == user_id,
-            ConnectionView.deleted_at.is_(None),
-        )
-        return (await self._session.execute(stmt)).scalar_one_or_none()
+        Never joined from a router. Storage is an implementation detail, so a
+        CMS or structured session tables become a change here and nowhere else.
+        """
+        return await self._session.get(EventContent, event_id)
 
 
-class ConnectionMaintenance:
-    """Bulk operations the job runner needs.
+# Below this cohort size, aggregates identify individuals: "2 of 3 connected"
+# names people. Every organizer-facing number is suppressed under it (ADR-0012).
+MIN_COHORT = 10
 
-    Lives here because `connections` and `connection_views` belong to this
-    domain. Workers ask for the work to be done; they do not query these tables
-    themselves.
+
+class EventDigestService:
+    """Finding events whose post-event digest is due.
+
+    Due-ness is computed in the event's LOCAL time, which is why the IANA
+    timezone is validated on create - an invalid name would silently skip the
+    single best retention mechanic in the product.
     """
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def due_reminders(self, at: datetime, limit: int = 500) -> list[ConnectionView]:
-        stmt = (
-            select(ConnectionView)
-            .where(ConnectionView.reminder_at.is_not(None))
-            .where(ConnectionView.reminder_at <= at)
-            .where(ConnectionView.reminder_done_at.is_(None))
-            .where(ConnectionView.deleted_at.is_(None))
-            .limit(limit)
-        )
-        return list((await self._session.execute(stmt)).scalars())
-
-    async def mark_reminder_sent(self, view: ConnectionView, at: datetime) -> None:
-        """Marked in the SAME transaction as the notification.
-
-        Marking first loses the reminder on a crash; marking after sends it
-        twice on a retry.
-        """
-        view.reminder_done_at = at
-
-    async def pending_older_than(self, at: datetime, limit: int = 200) -> list[Connection]:
-        stmt = (
-            select(Connection)
-            .where(Connection.state == ConnectionState.PENDING)
-            .where(Connection.deleted_at.is_(None))
-            .where(Connection.created_at <= at)
-            .limit(limit)
-        )
-        return list((await self._session.execute(stmt)).scalars())
-
-    async def digest_counts(self, event_id: UUID, user_id: UUID) -> dict[str, int]:
-        """What one person got out of an event.
-
-        `without_notes` is the actionable half - it turns the digest from a
-        summary into a prompt.
-        """
-        views = list(
-            (
-                await self._session.execute(
-                    select(ConnectionView)
-                    .join(Connection, Connection.id == ConnectionView.connection_id)
-                    .where(
-                        Connection.event_id == event_id,
-                        ConnectionView.user_id == user_id,
-                        ConnectionView.deleted_at.is_(None),
-                    )
-                )
-            ).scalars()
-        )
-        return {
-            "connections": len(views),
-            "without_notes": sum(1 for v in views if not v.note),
-        }
-
-    async def purge_for_user(self, user_id: UUID) -> int:
-        """Remove the erased user's own views.
-
-        Their counterpart's views survive - deletion is asymmetric, and one
-        person's erasure must not destroy another's record of a meeting that
-        happened (ADR-0003).
-        """
-        from sqlalchemy import delete
-
-        result = await self._session.execute(
-            delete(ConnectionView).where(ConnectionView.user_id == user_id)
-        )
-        return int(getattr(result, "rowcount", 0) or 0)
-
-
-class EventConnectionStats:
-    """Aggregate counts for one event.
-
-    Lives here because `connections` and `anonymous_scans` belong to this
-    domain. Events asks for numbers; it does not query these tables itself.
-
-    Returns raw counts only - suppression below the minimum cohort is the
-    events domain's decision, since it is the one that knows how many attendees
-    there are.
-    """
-
-    def __init__(self, session: AsyncSession) -> None:
-        self._session = session
-
-    async def for_event(self, event_id: UUID) -> tuple[int, int, int]:
-        """(connections, unique connectors, anonymous scans)."""
-        from sqlalchemy import func
-
-        from acme.domains.connections.models import AnonymousScan
-
-        connections = int(
-            (
-                await self._session.execute(
-                    select(func.count())
-                    .select_from(Connection)
-                    .where(
-                        Connection.event_id == event_id,
-                        Connection.deleted_at.is_(None),
-                    )
-                )
-            ).scalar_one()
-        )
-        pairs = (
+    async def due_for_digest(self, at: datetime) -> list[tuple[Event, list[UUID]]]:
+        events = (
             await self._session.execute(
-                select(Connection.user_low_id, Connection.user_high_id).where(
-                    Connection.event_id == event_id,
-                    Connection.deleted_at.is_(None),
+                select(Event)
+                .where(Event.deleted_at.is_(None))
+                .where(Event.ends_at <= at)
+                # A short window: this runs often, and an event that ended a
+                # month ago is not suddenly due.
+                .where(Event.ends_at >= at - timedelta(days=3))
+            )
+        ).scalars()
+
+        due: list[tuple[Event, list[UUID]]] = []
+        for event in events:
+            local_end = event.ends_at.astimezone(ZoneInfo(event.timezone))
+            if at < (local_end + timedelta(days=1)).astimezone(UTC):
+                continue
+            attendees = list(
+                (
+                    await self._session.execute(
+                        select(EventAttendee.user_id).where(
+                            EventAttendee.event_id == event.id,
+                            EventAttendee.deleted_at.is_(None),
+                        )
+                    )
+                ).scalars()
+            )
+            due.append((event, attendees))
+        return due
+
+
+class PublicEventService:
+    """The public event page and self-registration.
+
+    This surface did not exist, which was a real gap: `events.slug` was in the
+    schema with a unique index and no endpoint used it. An organizer putting
+    "register at example.net/e/devcon" on a slide had nowhere for that link to
+    land.
+
+    Anonymous-first, like the scan page and for the same reason: most people
+    who see the link do not have the app, and requiring an account before they
+    can register is the friction that loses them (ADR-0008).
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def by_slug(self, slug: str) -> Event:
+        """Resolve a public or unlisted event.
+
+        PRIVATE events never resolve by slug. Unlisted ones do - the link
+        works, the page is noindex - which is the difference between "anyone
+        with the link" and "anyone at all" (ADR-0008).
+
+        Goes through EventRepository rather than querying here: the same lookup
+        existed in both places, and two copies of a visibility rule is how one
+        of them ends up permitting a private event.
+        """
+        event = await EventRepository(self._session).by_slug_visible(slug)
+        if event is None:
+            raise ApiError("EVENT_NOT_FOUND", status_code=404)
+        return event
+
+    async def by_code(self, code: str) -> Event:
+        """Resolve by join code, for a QR on a badge or a slide.
+
+        Codes resolve regardless of visibility: holding one IS the invitation,
+        which is the whole reason a private event has a code at all.
+        """
+        event = await EventRepository(self._session).by_code(code)
+        if event is None:
+            raise ApiError("EVENT_CODE_INVALID", status_code=404)
+        return event
+
+    async def register_anonymously(
+        self, event: Event, *, email: str, display_name: str | None
+    ) -> bool:
+        """Self-registration, no account required.
+
+        Returns False when this email was already on the list, which is not an
+        error: someone who taps register twice, or who was already on the
+        organizer's upload, should see success either way.
+
+        Recorded as SELF_REGISTERED so the dashboard can tell a real
+        registration list from a landing page's signups. Collapsing them would
+        let "78% of your attendees connected" quietly overstate a number the
+        organizer repeats to sponsors.
+        """
+        normalised = email.strip().lower()
+        existing = (
+            await self._session.execute(
+                select(EventRosterEntry).where(
+                    EventRosterEntry.event_id == event.id,
+                    EventRosterEntry.email == normalised,
                 )
             )
-        ).all()
-        unique = len({u for pair in pairs for u in pair})
-        anonymous = int(
-            (
-                await self._session.execute(
-                    select(func.count())
-                    .select_from(AnonymousScan)
-                    .where(AnonymousScan.event_id == event_id)
-                )
-            ).scalar_one()
+        ).scalar_one_or_none()
+        if existing is not None:
+            return False
+
+        self._session.add(
+            EventRosterEntry(
+                event_id=event.id,
+                email=normalised,
+                display_name=display_name,
+                source=RosterSource.SELF_REGISTERED,
+            )
         )
-        return connections, unique, anonymous
+        await self._session.flush()
+        return True
+
+    async def render(self, event: Event) -> PublicEventOut:
+        """Assemble the public page.
+
+        Lives here rather than in the router because it needs the Event MODEL,
+        and entry points may not import a domain's models (import contract 4).
+        The router asks for a rendered response and never sees the row.
+
+        Content comes through EventsService.content_for() rather than a join,
+        so a future CMS is a resolver change (ADR-0027).
+        """
+        from acme.domains.identity.service import IdentityService
+
+        content = await EventsService(self._session).content_for(event.id)
+        org = await IdentityService(self._session).organization_branding(event.organization_id)
+
+        return PublicEventOut(
+            name=event.name,
+            venue=event.venue,
+            starts_at=event.starts_at,
+            ends_at=event.ends_at,
+            timezone=event.timezone,
+            organization_name=org.get("name") if org else None,
+            organization_logo_path=org.get("logo_path") if org else None,
+            body=content.body if content else None,
+            banner_path=content.banner_path if content else None,
+            indexable=event.visibility == EventVisibility.PUBLIC,
+        )
+
+    async def page_by_slug(self, slug: str) -> PublicEventOut:
+        return await self.render(await self.by_slug(slug))
+
+    async def page_by_code(self, code: str) -> PublicEventOut:
+        return await self.render(await self.by_code(code))
+
+    async def registration_counts(self, event_id: UUID) -> dict[str, int]:
+        """Roster size broken down by source.
+
+        Exposed so the dashboard can show the split rather than one number
+        that means different things depending on where the rows came from.
+        """
+        stmt = (
+            select(EventRosterEntry.source, func.count())
+            .where(EventRosterEntry.event_id == event_id)
+            .group_by(EventRosterEntry.source)
+        )
+        rows = (await self._session.execute(stmt)).all()
+        return {str(source): int(count) for source, count in rows}
 
 
-class ConnectionListService:
-    """The caller's contact list.
+class EventAdminService:
+    """Event management for organizers.
 
-    Separate from ConnectionsService, which the exchange uses to WRITE. This
-    one only ever reads and mutates the caller's own views, so it is
-    tenant-scoped throughout.
+    Separate from EventsService, which the exchange uses for membership lookups
+    during a scan. This one is always acting for a specific organizer and
+    checks their authority to do so.
     """
 
     def __init__(self, session: AsyncSession, user_id: UUID) -> None:
         self._session = session
         self._user_id = user_id
-        self._views = ConnectionViewRepository(session, Tenant.user(user_id))
-        self._edges = ConnectionEdgeRepository(session)
         self._entitlements = EntitlementsService(session)
 
-    async def page(
-        self,
-        *,
-        limit: int = 50,
-        cursor: str | None = None,
-        event_id: UUID | None = None,
-        tag: str | None = None,
-        include_archived: bool = False,
-    ) -> ConnectionListOut:
-        """One page of the caller's contacts.
+    async def _assert_staff(
+        self, event_id: UUID, *, roles: set[EventStaffRole] | None = None
+    ) -> Event:
+        """Event staff, NOT organization membership (ADR-0018).
 
-        Named `page`, not `list`: a method called `list` shadows the builtin
-        inside the class body, so any later `list[UUID]` annotation resolves to
-        the method and fails to typecheck. Worth knowing because the error
-        message ("Function ... is not valid as a type") points nowhere near the
-        cause.
-
-        Connection HISTORY is never gated (00-context/pricing.md).
-
-        Hiding contacts someone already made reads as theft and would generate
-        more one-star reviews than every other issue combined. Only export,
-        analytics and the reminder cap are paid.
+        A scanner hired for one day must see one event and nothing else. "Can
+        edit the organization's brand" and "can view this event's dashboard"
+        are different powers, and neither implies the other.
         """
-        stmt = self._views.feed(include_archived=include_archived)
-        if cursor is not None:
-            stmt = stmt.where(ConnectionView.id < _decode_cursor(cursor))
-        if tag is not None:
-            stmt = stmt.where(ConnectionView.tags.contains([tag]))
-
-        # One extra row tells us whether another page exists without a count.
-        rows = list((await self._session.execute(stmt.limit(limit + 1))).scalars())
-        has_more = len(rows) > limit
-        rows = rows[:limit]
-
-        edges = await self._edges.by_ids([r.connection_id for r in rows])
-        if event_id is not None:
-            rows = [r for r in rows if edges[r.connection_id].event_id == event_id]
-
-        items = [self._present(view, edges[view.connection_id]) for view in rows]
-        return ConnectionListOut(
-            items=items,
-            next_cursor=_encode_cursor(rows[-1].id) if has_more and rows else None,
+        stmt = (
+            select(Event)
+            .join(
+                EventStaff,
+                (EventStaff.event_id == Event.id)
+                & (EventStaff.user_id == self._user_id)
+                & (EventStaff.deleted_at.is_(None)),
+            )
+            .where(Event.id == event_id, Event.deleted_at.is_(None))
         )
+        if roles is not None:
+            stmt = stmt.where(EventStaff.role.in_(list(roles)))
 
-    def _present(self, view: ConnectionView, edge: Connection) -> ConnectionOut:
-        """Render one row from the caller's side of the edge.
+        event = (await self._session.execute(stmt)).scalar_one_or_none()
+        if event is None:
+            # Same code whether the event does not exist or this user has no
+            # role on it: distinguishing them confirms an event exists to
+            # someone with no access.
+            raise ApiError("EVENT_NOT_FOUND", status_code=404)
+        return event
 
-        The snapshot chosen is the OTHER party's, which is the whole point:
-        a connection shows you who you met, as they were at the time
-        (ADR-0004).
-        """
-        counterpart_snapshot = (
-            edge.card_high_snapshot if edge.user_low_id == self._user_id else edge.card_low_snapshot
+    async def create(self, organization_id: UUID, payload: EventCreate) -> Event:
+        if payload.ends_at <= payload.starts_at:
+            raise ApiError(
+                "VALIDATION_FAILED",
+                status_code=422,
+                message="ends_at must be after starts_at",
+            )
+        try:
+            ZoneInfo(payload.timezone)
+        except (KeyError, ValueError) as exc:
+            # An invalid IANA name silently breaks the post-event digest, which
+            # fires 24h after ends_at in LOCAL time, and every activity chart.
+            raise ApiError(
+                "VALIDATION_FAILED",
+                status_code=422,
+                message=f"unknown IANA timezone {payload.timezone!r}",
+            ) from exc
+
+        if payload.visibility == EventVisibility.PUBLIC:
+            await self._assert_public_listing_allowed(organization_id)
+
+        event = Event(
+            organization_id=organization_id,
+            created_by=self._user_id,
+            name=payload.name,
+            venue=payload.venue,
+            code=_new_join_code(),
+            starts_at=payload.starts_at,
+            ends_at=payload.ends_at,
+            timezone=payload.timezone,
+            visibility=payload.visibility,
+            leaderboard_enabled=payload.leaderboard_enabled,
         )
-        return ConnectionOut(
-            id=view.id,
-            connection_id=edge.id,
-            state=edge.state,
-            channel=edge.channel,
-            occurred_at=edge.occurred_at,
-            event_id=edge.event_id,
-            counterpart=CounterpartCard.model_validate(counterpart_snapshot),
-            note=view.note,
-            note_conflict=view.note_conflict,
-            tags=list(view.tags),
-            reminder_at=view.reminder_at,
-            reminder_done_at=view.reminder_done_at,
-            archived_at=view.archived_at,
-            merged_into_id=view.merged_into_id,
-            created_at=view.created_at,
-        )
-
-    async def get(self, view_id: UUID) -> ConnectionOut:
-        view = await self._views.get(view_id)
-        if view is None:
-            # Same code whether it does not exist or belongs to someone else.
-            # Distinguishing them confirms the connection exists to a stranger.
-            raise ApiError("CONNECTION_NOT_FOUND", status_code=404)
-        edges = await self._edges.by_ids([view.connection_id])
-        return self._present(view, edges[view.connection_id])
-
-    async def update(self, view_id: UUID, payload: ConnectionUpdate) -> ConnectionOut:
-        view = await self._views.get(view_id)
-        if view is None:
-            raise ApiError("CONNECTION_NOT_FOUND", status_code=404)
-
-        changes = payload.model_dump(exclude_unset=True)
-
-        if "reminder_at" in changes and changes["reminder_at"] is not None:
-            await self._assert_reminder_allowed(view)
-
-        if "note" in changes:
-            view.note = changes["note"]
-            view.note_updated_at = datetime.now(UTC)
-            if payload.resolve_note_conflict:
-                view.note_conflict = None
-
-        if "tags" in changes and changes["tags"] is not None:
-            # Deduplicated and ordered so two clients writing the same set do
-            # not produce a spurious difference on the next sync.
-            view.tags = sorted(set(changes["tags"]))
-
-        if "reminder_at" in changes:
-            view.reminder_at = changes["reminder_at"]
-            view.reminder_done_at = None
-
-        if changes.get("archived") is True:
-            view.archived_at = datetime.now(UTC)
-        elif changes.get("archived") is False:
-            view.archived_at = None
-
+        self._session.add(event)
         await self._session.flush()
-        edges = await self._edges.by_ids([view.connection_id])
-        return self._present(view, edges[view.connection_id])
 
-    async def _assert_reminder_allowed(self, view: ConnectionView) -> None:
-        """The free tier caps ACTIVE reminders at 3.
+        # The creator is owner staff. Without this the person who made the
+        # event cannot open its dashboard.
+        self._session.add(
+            EventStaff(
+                event_id=event.id,
+                user_id=self._user_id,
+                role=EventStaffRole.OWNER,
+            )
+        )
+        await self._session.flush()
+        return event
 
-        Capped rather than removed, because a free user has to experience the
-        feature working before they will pay to uncap it
-        (00-context/pricing.md).
+    async def _assert_public_listing_allowed(self, organization_id: UUID) -> None:
+        """Public indexed pages require a verified domain or a paid plan.
+
+        That gate is both the SEO strategy and the anti-spam filter: nobody
+        pays to host a phishing page, and an ungated public listing on our
+        domain is how a Safe Browsing blocklisting starts (ADR-0008).
         """
-        if view.reminder_at is not None and view.reminder_done_at is None:
-            return  # replacing an existing reminder, not adding one
+        if await IdentityService(self._session).has_verified_domain(organization_id):
+            return
+        if await self._entitlements.allowed(
+            Subject.organization(organization_id), "event.branded_page"
+        ):
+            return
+        raise ApiError(
+            "ORG_DOMAIN_NOT_VERIFIED",
+            status_code=403,
+            message="public events need a verified domain or a paid plan",
+        )
+
+    async def join(self, code: str, user_id: UUID, card_id: UUID | None) -> Event:
+        event = (
+            await self._session.execute(
+                select(Event).where(Event.code == code, Event.deleted_at.is_(None))
+            )
+        ).scalar_one_or_none()
+        if event is None:
+            raise ApiError("EVENT_CODE_INVALID", status_code=404)
+
+        existing = (
+            await self._session.execute(
+                select(EventAttendee).where(
+                    EventAttendee.event_id == event.id,
+                    EventAttendee.user_id == user_id,
+                    EventAttendee.deleted_at.is_(None),
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            # Rejoining is not an error. A user who taps join twice, or who
+            # left and came back, gets the same result.
+            existing.card_id = card_id or existing.card_id
+            return event
 
         limit = await self._entitlements.limit(
-            Subject.user(self._user_id), "connection.reminder_limit"
+            Subject.organization(event.organization_id), "event.attendee_limit"
         )
-        if limit == -1:
-            return
-        if await self._views.active_reminder_count() >= limit:
+        if limit != -1 and await self._attendee_count(event.id) >= limit:
+            # Hitting this mid-event is a terrible customer moment, which is
+            # why runbooks/event-day.md checks capacity the week before.
             raise ApiError(
-                "CONNECTION_REMINDER_LIMIT_REACHED",
+                "EVENT_ATTENDEE_LIMIT_REACHED",
                 status_code=403,
-                message=f"plan allows {limit} active reminders",
+                message=f"plan allows {limit} attendees",
                 details={"limit": limit},
             )
 
-    async def delete(self, view_id: UUID) -> None:
-        """Per-view soft delete.
-
-        The EDGE survives until both participants delete their view. Both
-        expect asymmetric deletion and GDPR requires it: my removing a contact
-        must not erase your record of the same meeting (ADR-0003).
-        """
-        view = await self._views.get(view_id)
-        if view is None:
-            raise ApiError("CONNECTION_NOT_FOUND", status_code=404)
-        view.deleted_at = datetime.now(UTC)
+        self._session.add(EventAttendee(event_id=event.id, user_id=user_id, card_id=card_id))
         await self._session.flush()
+        return event
 
-    async def merge(self, target_id: UUID, source_ids: list[UUID]) -> ConnectionOut:
-        """Fold duplicate views into one contact.
+    async def _attendee_count(self, event_id: UUID) -> int:
+        """Delegates. The same count existed here and in EventRepository, and
+        a capacity check that disagrees with the dashboard is worse than
+        either number alone."""
+        return await EventRepository(self._session).attendee_count(event_id)
 
-        Meeting the same person at three events is one contact with three event
-        tags, not three contacts. Only the caller's VIEWS merge - the edges
-        stay, because each records a real meeting that happened.
+    async def update(self, event_id: UUID, payload: "EventUpdate") -> Event:
+        """Change an event after creation.
+
+        This did not exist, which made every event immutable: venues move,
+        times shift, and an organizer who typed the wrong date had no recourse
+        but to create a second event and re-share the code.
+
+        Owner or manager only. A scanner hired for the day must not be able to
+        move the event.
         """
-        target = await self._views.get(target_id)
-        if target is None:
-            raise ApiError("CONNECTION_NOT_FOUND", status_code=404)
-
-        target_pair = await self._edges.participants_of(target.connection_id)
-        merged_tags = set(target.tags)
-        notes = [target.note] if target.note else []
-
-        for source_id in source_ids:
-            if source_id == target_id:
-                raise ApiError(
-                    "CONNECTION_MERGE_INVALID",
-                    status_code=422,
-                    message="cannot merge a connection into itself",
-                )
-            source = await self._views.get(source_id)
-            if source is None:
-                raise ApiError("CONNECTION_NOT_FOUND", status_code=404)
-
-            source_pair = await self._edges.participants_of(source.connection_id)
-            if source_pair != target_pair:
-                # Merging two different people into one contact silently loses
-                # one of them, and the user would not find out until they went
-                # looking for someone who is no longer there.
-                raise ApiError(
-                    "CONNECTION_MERGE_INVALID",
-                    status_code=422,
-                    message="connections are with different people",
-                )
-
-            merged_tags.update(source.tags)
-            if source.note:
-                notes.append(source.note)
-            source.merged_into_id = target.id
-
-        target.tags = sorted(merged_tags)
-        if len(notes) > 1:
-            # Concatenated, never discarded. Notes are the highest-value
-            # user-authored data here and losing one to a merge is
-            # unacceptable (ADR-0016).
-            target.note = "\n\n---\n\n".join(notes)
-            target.note_updated_at = datetime.now(UTC)
-
-        await self._session.flush()
-        edges = await self._edges.by_ids([target.connection_id])
-        return self._present(target, edges[target.connection_id])
-
-    async def find_duplicates(self) -> dict[UUID, list[UUID]]:
-        """Group the caller's views by counterpart.
-
-        Surfaces "you have met this person 3 times" so the client can offer a
-        merge, rather than doing it automatically - two meetings at different
-        events are legitimately two records until the user says otherwise.
-        """
-        views = list((await self._session.execute(self._views.feed())).scalars())
-        counterparts = await self._edges.counterpart_ids(
-            self._user_id, [v.connection_id for v in views]
+        event = await self._assert_staff(
+            event_id, roles={EventStaffRole.OWNER, EventStaffRole.MANAGER}
         )
-        grouped: dict[UUID, list[UUID]] = {}
-        for view in views:
-            other = counterparts.get(view.connection_id)
-            if other is not None:
-                grouped.setdefault(other, []).append(view.id)
-        return {k: v for k, v in grouped.items() if len(v) > 1}
+        changes = payload.model_dump(exclude_unset=True)
+
+        starts = changes.get("starts_at", event.starts_at)
+        ends = changes.get("ends_at", event.ends_at)
+        if ends <= starts:
+            raise ApiError(
+                "VALIDATION_FAILED",
+                status_code=422,
+                message="ends_at must be after starts_at",
+            )
+
+        if "timezone" in changes and changes["timezone"] is not None:
+            try:
+                ZoneInfo(changes["timezone"])
+            except (KeyError, ValueError) as exc:
+                # An invalid name silently breaks the post-event digest, which
+                # fires 24h after ends_at in LOCAL time.
+                raise ApiError(
+                    "VALIDATION_FAILED",
+                    status_code=422,
+                    message=f"unknown IANA timezone {changes['timezone']!r}",
+                ) from exc
+
+        if changes.get("visibility") == EventVisibility.PUBLIC:
+            # Re-checked on every change to public, not only at creation.
+            # Otherwise an event created private becomes an indexed public page
+            # with no verification at all.
+            await self._assert_public_listing_allowed(event.organization_id)
+
+        for key, value in changes.items():
+            setattr(event, key, value)
+        await self._session.flush()
+        return event
+
+    async def set_content(self, event_id: UUID, payload: "EventContentUpdate") -> EventContent:
+        """Write the presentational half.
+
+        `event_content` was split from `events` in ADR-0027 and nothing could
+        write it, so a public event page could never have a body or a banner -
+        the split existed and the feature did not.
+
+        `body` is Tiptap JSON, sanitized on write AND on read. Never raw HTML:
+        this renders on the UGC domain, where user HTML is the
+        highest-consequence vulnerability in the product.
+        """
+        await self._assert_staff(event_id, roles={EventStaffRole.OWNER, EventStaffRole.MANAGER})
+
+        content = await self._session.get(EventContent, event_id)
+        if content is None:
+            content = EventContent(event_id=event_id)
+            self._session.add(content)
+
+        for key, value in payload.model_dump(exclude_unset=True).items():
+            setattr(content, key, value)
+        await self._session.flush()
+        return content
+
+    async def mine(self) -> tuple[list[Event], list[Event]]:
+        """Events this user runs, and events they attend.
+
+        Both, because they are different lists to a user and the same person is
+        often in both: an organizer attends other people's events too.
+        """
+        repository = EventRepository(self._session)
+        return (
+            await repository.staffed_by(self._user_id),
+            await repository.attended_by(self._user_id),
+        )
+
+    async def import_roster(self, event_id: UUID, entries: list[tuple[str, str | None]]) -> int:
+        """Upload the organizer's registration list.
+
+        Gives the dashboard a denominator, which is what turns "400
+        connections" into "78% of your attendees connected" - the number
+        organizers are actually asked about.
+
+        Idempotent on (event_id, email): organizers re-upload lists, and a
+        silent duplicate would double the denominator and halve the headline
+        number.
+        """
+        event = await self._assert_staff(
+            event_id, roles={EventStaffRole.OWNER, EventStaffRole.MANAGER}
+        )
+        if not await self._entitlements.allowed(
+            Subject.organization(event.organization_id), "event.attendee_import"
+        ):
+            raise ApiError(
+                "BILLING_ENTITLEMENT_MISSING",
+                status_code=403,
+                details={"entitlement": "event.attendee_import"},
+            )
+
+        existing = {
+            row.email
+            for row in (
+                await self._session.execute(
+                    select(EventRosterEntry).where(EventRosterEntry.event_id == event_id)
+                )
+            ).scalars()
+        }
+        added = 0
+        for email, name in entries:
+            normalised = email.strip().lower()
+            if not normalised or normalised in existing:
+                continue
+            self._session.add(
+                EventRosterEntry(event_id=event_id, email=normalised, display_name=name)
+            )
+            existing.add(normalised)
+            added += 1
+        await self._session.flush()
+        return added
+
+    async def stats(self, event_id: UUID) -> EventStatsOut:
+        """AGGREGATES ONLY (ADR-0012).
+
+        Nothing here reveals which attendee connected with which. That is
+        third-party disclosure of relationship data neither party consented to,
+        and there is no lawful basis for it.
+
+        Suppressed below MIN_COHORT, because on a small event an aggregate
+        identifies individuals however it is phrased.
+        """
+        await self._assert_staff(event_id)
+
+        attendees = await self._attendee_count(event_id)
+        connections, unique_count, anonymous = await EventConnectionStats(self._session).for_event(
+            event_id
+        )
+
+        if attendees < MIN_COHORT:
+            return EventStatsOut(
+                attendees=attendees,
+                connections=0,
+                unique_connectors=0,
+                connected_percentage=None,
+                anonymous_scans=0,
+                suppressed=True,
+            )
+
+        return EventStatsOut(
+            attendees=attendees,
+            connections=connections,
+            unique_connectors=unique_count,
+            connected_percentage=round(100 * unique_count / attendees, 1),
+            anonymous_scans=anonymous,
+        )
 
 
-def _encode_cursor(view_id: UUID) -> str:
-    return view_id.hex
+def _new_join_code() -> str:
+    """Short, human-readable, unambiguous.
 
+    Read aloud and typed at a venue, so 0/O and 1/I/L are excluded - a code
+    that gets mistyped at the door is worse than a longer one.
+    """
+    import secrets
 
-def _decode_cursor(cursor: str) -> UUID:
-    try:
-        return UUID(hex=cursor)
-    except ValueError as exc:
-        raise ApiError("VALIDATION_FAILED", status_code=422, message="malformed cursor") from exc
+    alphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+    return "".join(secrets.choice(alphabet) for _ in range(6))

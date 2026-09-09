@@ -1,6 +1,5 @@
 """Events repository."""
 
-from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -27,14 +26,29 @@ class EventRepository:
         return (await self._session.execute(stmt)).scalar_one_or_none()
 
     async def by_slug(self, slug: str) -> Event | None:
-        """Public lookup. Only PUBLIC events resolve.
+        """Indexable lookup. Only PUBLIC events resolve.
 
-        Unlisted events have a working link but must not be discoverable, and
-        private ones must not resolve by slug at all (ADR-0008).
+        For the sitemap and anything that decides what search engines see.
         """
         stmt = select(Event).where(
             Event.slug == slug.strip().lower(),
             Event.visibility == EventVisibility.PUBLIC,
+            Event.deleted_at.is_(None),
+        )
+        return (await self._session.execute(stmt)).scalar_one_or_none()
+
+    async def by_slug_visible(self, slug: str) -> Event | None:
+        """Page lookup. PUBLIC and UNLISTED both resolve.
+
+        The difference from by_slug() is the whole visibility model: an
+        unlisted event has a working link and is noindex, a private one does
+        not resolve by slug at all (ADR-0008). Two methods rather than a
+        boolean argument, because a boolean at a call site is unreadable and
+        getting it backwards silently publishes a private event.
+        """
+        stmt = select(Event).where(
+            Event.slug == slug.strip().lower(),
+            Event.visibility.in_([EventVisibility.PUBLIC, EventVisibility.UNLISTED]),
             Event.deleted_at.is_(None),
         )
         return (await self._session.execute(stmt)).scalar_one_or_none()
@@ -77,16 +91,3 @@ class EventRepository:
             )
         )
         return int((await self._session.execute(stmt)).scalar_one())
-
-    async def upcoming_public(self, after: datetime, limit: int = 50) -> list[Event]:
-        stmt = (
-            select(Event)
-            .where(
-                Event.visibility == EventVisibility.PUBLIC,
-                Event.starts_at >= after,
-                Event.deleted_at.is_(None),
-            )
-            .order_by(Event.starts_at)
-            .limit(limit)
-        )
-        return list((await self._session.execute(stmt)).scalars())
