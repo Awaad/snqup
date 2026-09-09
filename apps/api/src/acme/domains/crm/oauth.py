@@ -114,7 +114,11 @@ async def exchange_code(
     long-lived credential to someone's CRM sitting in a mobile app or in
     localStorage is a leak waiting for a decompiler.
     """
-    url = GOOGLE_TOKEN_URL if provider is CrmProvider.GOOGLE_CONTACTS else HUBSPOT_TOKEN_URL
+    # == not `is` throughout this module. CrmProvider is a StrEnum and a raw
+    # string reaching here - from a database row read before refresh, or from a
+    # caller passing the literal - makes identity comparison silently take the
+    # WRONG branch, posting a Google authorization code to HubSpot.
+    url = GOOGLE_TOKEN_URL if provider == CrmProvider.GOOGLE_CONTACTS else HUBSPOT_TOKEN_URL
     form = {
         "grant_type": "authorization_code",
         "code": code,
@@ -136,7 +140,7 @@ async def exchange_code(
 
     payload = response.json()
     refresh = payload.get("refresh_token")
-    if not refresh and provider is CrmProvider.GOOGLE_CONTACTS:
+    if not refresh and provider == CrmProvider.GOOGLE_CONTACTS:
         # Google only returns a refresh token when access_type=offline and the
         # user has not already granted consent. Without one the connection dies
         # in an hour and the user has no idea why, so fail here where the cause
@@ -172,7 +176,7 @@ async def refresh_tokens(
     if not tokens.refresh_token:
         raise CrmAuthError("no refresh token stored")
 
-    url = GOOGLE_TOKEN_URL if provider is CrmProvider.GOOGLE_CONTACTS else HUBSPOT_TOKEN_URL
+    url = GOOGLE_TOKEN_URL if provider == CrmProvider.GOOGLE_CONTACTS else HUBSPOT_TOKEN_URL
     form = {
         "grant_type": "refresh_token",
         "refresh_token": tokens.refresh_token,
@@ -207,7 +211,7 @@ def authorize_url(provider: CrmProvider, *, client_id: str, redirect_uri: str, s
     """
     from urllib.parse import urlencode
 
-    if provider is CrmProvider.GOOGLE_CONTACTS:
+    if provider == CrmProvider.GOOGLE_CONTACTS:
         params = {
             "client_id": client_id,
             "redirect_uri": redirect_uri,

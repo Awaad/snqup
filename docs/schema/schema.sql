@@ -396,7 +396,19 @@ CREATE TABLE event_roster_entries (
     email               citext,
     display_name        text,
     matched_user_id     uuid REFERENCES users(id) ON DELETE SET NULL,
-    created_at          timestamptz NOT NULL DEFAULT now()
+    -- WHO put this row here. The denominator on the organizer dashboard means
+    -- something different depending on the answer: "78% of your attendees
+    -- connected" against an uploaded registration list is a real conversion
+    -- number, and against a list half-filled by people who self-registered on
+    -- a landing page it is a different claim entirely.
+    --
+    -- Without this column the two are indistinguishable and the dashboard
+    -- quietly overstates.
+    source              text NOT NULL DEFAULT 'organizer_import',
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT event_roster_entries_source_check_values CHECK (
+        source IN ('organizer_import', 'self_registered', 'app_join')
+    )
 );
 CREATE INDEX event_roster_event_idx ON event_roster_entries (event_id);
 -- Organizers re-upload the same registration list. Without this, the second

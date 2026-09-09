@@ -18,7 +18,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from acme.core.db import Base, CIText, constrained
 from acme.core.ids import new_id
-from acme.domains.events.enums import EventStaffRole, EventVisibility
+from acme.domains.events.enums import EventStaffRole, EventVisibility, RosterSource
 
 
 class Event(Base):
@@ -237,6 +237,11 @@ class EventRosterEntry(Base):
     display_name: Mapped[str | None] = mapped_column(Text)
     matched_user_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL")
+    )
+    # Who put this row here. See RosterSource - the dashboard denominator
+    # means something different for each, and collapsing them overstates.
+    source: Mapped[RosterSource] = mapped_column(
+        constrained(RosterSource), server_default=text("'organizer_import'")
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

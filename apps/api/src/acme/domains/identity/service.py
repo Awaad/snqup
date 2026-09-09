@@ -210,6 +210,18 @@ class IdentityService:
             "created_at": profile.created_at.isoformat(),
         }
 
+    async def organization_branding(self, organization_id: UUID) -> dict[str, str | None] | None:
+        """Just what a public page renders.
+
+        Deliberately narrow: a public event page needs a name and a logo, and
+        returning the whole organization would put its description, website and
+        internal flags on a page anyone can read.
+        """
+        org = await self._session.get(Organization, organization_id)
+        if org is None or org.deleted_at is not None:
+            return None
+        return {"name": org.name, "logo_path": org.logo_path}
+
     async def admin_search(self, *, email: str | None, limit: int = 20) -> list[dict[str, object]]:
         """Support lookup. Emails MASKED in the result.
 
