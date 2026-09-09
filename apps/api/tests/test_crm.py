@@ -219,3 +219,186 @@ class TestCardLinks:
             CardUpdate(links=[CardLink(label="New", url="https://example.com/new")]),
         )
         assert [link["label"] for link in card.links] == ["New"]
+
+
+class TestOAuthState:
+    """The CSRF defence, and the reason it exists.
+
+    Without a bound, verified, single-use state, an attacker completes an
+    authorization flow with THEIR CRM and delivers the callback to a victim.
+    The victim's account connects to the attacker's CRM and every contact they
+    collect is pushed to the attacker — while their app says "connected".
+    """
+
+    @pytest.fixture
+    async def redis(self):
+        import os
+
+        from redis.asyncio import Redis
+
+        client = Redis.from_url(
+            os.environ.get("REDIS_URL", "redis://localhost:6379/0"),
+            decode_responses=True,
+        )
+        await client.flushdb()
+        yield client
+        await client.flushdb()
+        await client.aclose()
+
+    async def test_a_valid_state_round_trips(self, redis) -> None:
+        from acme.domains.crm.oauth import OAuthStateStore
+
+        store = OAuthStateStore(redis)
+        state = await store.issue("user-1", CrmProvider.HUBSPOT, "https://cb")
+
+        stored = await store.consume(state, "user-1")
+        assert stored["provider"] == "hubspot"
+
+    async def test_state_is_single_use(self, redis) -> None:
+        """A leaked callback URL must not be replayable."""
+        from acme.domains.crm.oauth import OAuthStateStore
+
+        store = OAuthStateStore(redis)
+        state = await store.issue("user-1", CrmProvider.HUBSPOT, "https://cb")
+        await store.consume(state, "user-1")
+
+        with pytest.raises(ApiError) as exc:
+            await store.consume(state, "user-1")
+        assert exc.value.code == "CRM_OAUTH_STATE_INVALID"
+
+    async def test_another_users_state_is_refused(self, redis) -> None:
+        """THE ATTACK. A callback belonging to a different account is not a
+        mistake to tolerate."""
+        from acme.domains.crm.oauth import OAuthStateStore
+
+        store = OAuthStateStore(redis)
+        state = await store.issue("attacker", CrmProvider.HUBSPOT, "https://cb")
+
+        with pytest.raises(ApiError) as exc:
+            await store.consume(state, "victim")
+        assert exc.value.code == "CRM_OAUTH_STATE_INVALID"
+
+    async def test_an_unknown_state_is_refused(self, redis) -> None:
+        """Fails CLOSED, unlike rate limiting. This one IS the defence, and
+        proceeding without it connects an account to an unverified CRM."""
+        from acme.domains.crm.oauth import OAuthStateStore
+
+        with pytest.raises(ApiError):
+            await OAuthStateStore(redis).consume("never-issued", "user-1")
+
+
+class TestCrmConnectionLifecycle:
+    async def test_credentials_are_encrypted_at_rest(self, session: AsyncSession) -> None:
+        """A CRM refresh token is write access to someone's customer database.
+        A database dump alone must not yield working credentials."""
+        from cryptography.fernet import Fernet
+
+        from acme.domains.crm.oauth import OAuthTokens, TokenCipher
+        from acme.domains.crm.service import CrmService
+
+        user = await _user(session, "crm-a")
+        cipher = TokenCipher(Fernet.generate_key().decode())
+        connection = await CrmService(session, user.id).connect(
+            CrmProvider.HUBSPOT,
+            OAuthTokens(access_token="at", refresh_token="rt", expires_at=None),
+            cipher,
+        )
+
+        assert b"rt" not in connection.credentials
+        assert cipher.decrypt(connection.credentials).refresh_token == "rt"
+
+    async def test_reconnecting_replaces_rather_than_duplicates(
+        self, session: AsyncSession
+    ) -> None:
+        """Two live connections would double-write every contact with neither
+        obviously wrong."""
+        from cryptography.fernet import Fernet
+
+        from acme.domains.crm.oauth import OAuthTokens, TokenCipher
+        from acme.domains.crm.service import CrmService
+
+        user = await _user(session, "crm-b")
+        cipher = TokenCipher(Fernet.generate_key().decode())
+        service = CrmService(session, user.id)
+        tokens = OAuthTokens(access_token="at", refresh_token="rt", expires_at=None)
+
+        await service.connect(CrmProvider.HUBSPOT, tokens, cipher)
+        await service.connect(CrmProvider.HUBSPOT, tokens, cipher)
+
+        assert len(await service.connections()) == 1
+
+    async def test_field_mapping_is_per_connection(self, session: AsyncSession) -> None:
+        """Two HubSpot portals name their custom properties differently."""
+        from cryptography.fernet import Fernet
+
+        from acme.domains.crm.oauth import OAuthTokens, TokenCipher
+        from acme.domains.crm.service import CrmService
+
+        user = await _user(session, "crm-c")
+        cipher = TokenCipher(Fernet.generate_key().decode())
+        service = CrmService(session, user.id)
+        await service.connect(
+            CrmProvider.HUBSPOT,
+            OAuthTokens(access_token="at", refresh_token="rt", expires_at=None),
+            cipher,
+        )
+
+        updated = await service.set_field_mapping(CrmProvider.HUBSPOT, {"note": "how_we_met"})
+        assert updated.field_mapping == {"note": "how_we_met"}
+
+    async def test_syncing_an_unconnected_provider_is_refused(self, session: AsyncSession) -> None:
+        from acme.domains.crm.service import CrmService
+
+        user = await _user(session, "crm-d")
+        with pytest.raises(ApiError) as exc:
+            await CrmService(session, user.id).disconnect(CrmProvider.HUBSPOT)
+        assert exc.value.code == "CRM_NOT_CONNECTED"
+
+
+class TestSyncSafety:
+    async def test_a_missing_credential_key_refuses_loudly(self) -> None:
+        """Refusing beats storing a CRM token in the clear."""
+        from acme.domains.crm.service import CrmSyncService
+
+        with pytest.raises(ValueError, match="CRM_TOKEN_KEY"):
+            CrmSyncService(None, "")  # type: ignore[arg-type]
+
+    async def test_a_connection_needing_reauth_is_not_retried(self, session: AsyncSession) -> None:
+        """Retrying a revoked grant forever produces a queue that never drains
+        and a user who is never told their sync broke."""
+        from cryptography.fernet import Fernet
+
+        from acme.domains.crm.oauth import OAuthTokens, TokenCipher
+        from acme.domains.crm.service import CrmService, CrmSyncService
+
+        key = Fernet.generate_key().decode()
+        user = await _user(session, "crm-e")
+        connection = await CrmService(session, user.id).connect(
+            CrmProvider.HUBSPOT,
+            OAuthTokens(access_token="at", refresh_token="rt", expires_at=None),
+            TokenCipher(key),
+        )
+        connection.needs_reauth = True
+        await session.flush()
+
+        assert await CrmSyncService(session, key).push(connection.id, []) == 0
+
+    async def test_a_deleted_connection_pushes_nothing(self, session: AsyncSession) -> None:
+        from datetime import UTC, datetime
+
+        from cryptography.fernet import Fernet
+
+        from acme.domains.crm.oauth import OAuthTokens, TokenCipher
+        from acme.domains.crm.service import CrmService, CrmSyncService
+
+        key = Fernet.generate_key().decode()
+        user = await _user(session, "crm-f")
+        connection = await CrmService(session, user.id).connect(
+            CrmProvider.HUBSPOT,
+            OAuthTokens(access_token="at", refresh_token="rt", expires_at=None),
+            TokenCipher(key),
+        )
+        connection.deleted_at = datetime.now(UTC)
+        await session.flush()
+
+        assert await CrmSyncService(session, key).push(connection.id, []) == 0

@@ -27,6 +27,7 @@ from acme.domains.connections.schemas import (
     ConnectionUpdate,
     CounterpartCard,
 )
+from acme.domains.crm.adapter import ContactPayload  # noqa: TC001
 
 
 def order_pair(a: UUID, b: UUID) -> tuple[UUID, UUID]:
@@ -245,6 +246,81 @@ class EventConnectionStats:
             ).scalar_one()
         )
         return connections, unique, anonymous
+
+
+class CrmExportService:
+    """Connection views as CRM-ready payloads.
+
+    Lives here because `connection_views` belongs to this domain, and the NOTE
+    is the field being exported - the single most valuable thing we send, and
+    the one that sits in a per-user row precisely so it cannot leak (ADR-0003).
+
+    Returns the provider-neutral ContactPayload shape. Mapping it onto Google's
+    `person` or HubSpot's `properties` is the adapter's job.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def contacts_for_sync(
+        self, user_id: UUID, view_ids: list[UUID]
+    ) -> list[tuple[UUID, "ContactPayload"]]:
+        from acme.domains.crm.adapter import ContactPayload
+
+        stmt = (
+            select(ConnectionView, Connection)
+            .join(Connection, Connection.id == ConnectionView.connection_id)
+            .where(
+                ConnectionView.user_id == user_id,
+                ConnectionView.deleted_at.is_(None),
+                # Merged views would push the same person twice under two ids.
+                ConnectionView.merged_into_id.is_(None),
+            )
+        )
+        if view_ids:
+            stmt = stmt.where(ConnectionView.id.in_(view_ids))
+
+        rows = (await self._session.execute(stmt)).all()
+
+        contacts: list[tuple[UUID, ContactPayload]] = []
+        for view, edge in rows:
+            snapshot = (
+                edge.card_high_snapshot if edge.user_low_id == user_id else edge.card_low_snapshot
+            )
+            contacts.append(
+                (
+                    view.id,
+                    ContactPayload(
+                        display_name=str(snapshot.get("display_name") or "Unknown"),
+                        email=_optional(snapshot.get("email")),
+                        phone=_optional(snapshot.get("phone")),
+                        company=_optional(snapshot.get("company")),
+                        title=_optional(snapshot.get("headline")),
+                        website=_optional(snapshot.get("website")),
+                        # The ten seconds after the handshake. A CRM row with a
+                        # name and no context is a row they already had.
+                        note=view.note,
+                        met_at=edge.occurred_at.isoformat(),
+                        met_context=_met_context(edge),
+                        tags=list(view.tags),
+                    ),
+                )
+            )
+        return contacts
+
+
+def _optional(value: object) -> str | None:
+    return str(value) if value else None
+
+
+def _met_context(edge: Connection) -> str | None:
+    """Where and when, in one line.
+
+    Rendered from the snapshot rather than the live card: it records what was
+    actually exchanged, not what the person's card says today (ADR-0004).
+    """
+    when = edge.occurred_at.strftime("%d %b %Y")
+    return f"Met {when}" if edge.event_id is None else f"Met {when} at an event"
 
 
 class ConnectionListService:

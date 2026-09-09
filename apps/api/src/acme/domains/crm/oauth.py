@@ -238,3 +238,76 @@ def generate_state() -> str:
     import secrets
 
     return base64.urlsafe_b64encode(secrets.token_bytes(24)).decode().rstrip("=")
+
+
+class OAuthStateStore:
+    """CSRF state for the OAuth handshake.
+
+    THE ATTACK this prevents, which is easy to underrate: without a bound,
+    verified state, an attacker completes an authorization flow with THEIR CRM
+    account and delivers the resulting callback URL to a victim. The victim's
+    account is then connected to the attacker's CRM, and every contact the
+    victim collects is pushed to them.
+
+    Nothing about that looks wrong to the victim - their sync says "connected".
+
+    Three properties, all necessary:
+
+      bound        stored against the user who STARTED the flow, so a callback
+                   cannot be replayed into a different account
+      single use   consumed on verification, so a leaked callback URL cannot be
+                   replayed
+      short lived  ten minutes is longer than any real handshake and shorter
+                   than a stolen link is useful
+    """
+
+    TTL_SECONDS = 600
+
+    def __init__(self, redis: object) -> None:
+        self._redis = redis
+
+    @staticmethod
+    def _key(state: str) -> str:
+        return f"crmstate:{state}"
+
+    async def issue(self, user_id: str, provider: CrmProvider, redirect_uri: str) -> str:
+        state = generate_state()
+        await self._redis.set(  # type: ignore[attr-defined]
+            self._key(state),
+            json.dumps(
+                {
+                    "user_id": user_id,
+                    "provider": str(provider),
+                    "redirect_uri": redirect_uri,
+                }
+            ),
+            ex=self.TTL_SECONDS,
+        )
+        return state
+
+    async def consume(self, state: str, user_id: str) -> dict[str, str]:
+        """Verify and burn.
+
+        FAILS CLOSED, unlike rate limiting and idempotency. Those degrade a
+        defence when Valkey is unavailable; this one IS the defence, and
+        proceeding without it would connect an account to an unverified CRM.
+        """
+        raw = await self._redis.get(self._key(state))  # type: ignore[attr-defined]
+        if raw is None:
+            raise ApiError(
+                "CRM_OAUTH_STATE_INVALID",
+                status_code=400,
+                message="authorization state is missing, expired or already used",
+            )
+        await self._redis.delete(self._key(state))  # type: ignore[attr-defined]
+
+        stored: dict[str, str] = json.loads(raw)
+        if stored.get("user_id") != user_id:
+            # The callback belongs to a different account. This is the attack,
+            # not a mistake.
+            raise ApiError(
+                "CRM_OAUTH_STATE_INVALID",
+                status_code=400,
+                message="authorization state does not belong to this account",
+            )
+        return stored
