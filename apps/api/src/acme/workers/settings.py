@@ -50,6 +50,33 @@ async def send_reciprocity_nudges(ctx: dict[str, Any]) -> int:
     return await _run("send_reciprocity_nudges", ctx)
 
 
+async def deliver_notifications(ctx: dict[str, Any]) -> int:
+    """Send what the other jobs wrote.
+
+    Runs OFTEN because a follow-up reminder is worthless an hour late, and
+    because quiet hours defer rather than drop - a notification held overnight
+    needs a run soon after 08:00 local, and local differs by user.
+    """
+    return await _run("deliver_notifications", ctx)
+
+
+async def sync_crm_contacts(ctx: dict[str, Any], connection_id: str, view_ids: list[str]) -> int:
+    """Enqueued on demand, not on a schedule.
+
+    A user asking to sync wants it now; a cron would either be too slow to feel
+    responsive or run constantly against connections with nothing to push.
+    """
+    factory = ctx["session_factory"]
+    async with factory() as session:
+        try:
+            result: int = await jobs.sync_crm_contacts(session, connection_id, view_ids)
+            await session.commit()
+            return result
+        except Exception:
+            await session.rollback()
+            raise
+
+
 async def purge_deleted(ctx: dict[str, Any]) -> int:
     """The one that must ALERT on failure, not merely log.
 
@@ -123,6 +150,8 @@ class WorkerSettings:
         send_due_reminders,
         send_post_event_digests,
         send_reciprocity_nudges,
+        deliver_notifications,
+        sync_crm_contacts,
         purge_deleted,
     ]
     cron_jobs: ClassVar = [
@@ -133,6 +162,10 @@ class WorkerSettings:
         # hourly to catch every timezone's window.
         cron(send_post_event_digests, minute={7}),
         cron(send_reciprocity_nudges, hour={9}, minute={0}),
+        # Every two minutes. Reminders are time-sensitive to the user, and
+        # quiet-hours deferrals need a run soon after 08:00 in whatever
+        # timezone the recipient is in.
+        cron(deliver_notifications, minute=set(range(0, 60, 2))),
         # Daily, off-peak. Batched, so a backlog drains over several runs
         # rather than locking a table for a long delete.
         cron(purge_deleted, hour={3}, minute={0}),

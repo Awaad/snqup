@@ -38,7 +38,38 @@ class Settings(BaseSettings):
     jwt_public_keys: list[str] = Field(default_factory=list)
 
     sentry_dsn: str | None = None
+    
+    # Billing. No defaults: a missing webhook secret must fail at startup, not
+    # silently accept unsigned requests.
+    stripe_webhook_secret: str = ""
+    apple_bundle_id: str = ""
+    google_play_pubsub_audience: str = ""
+    google_play_pubsub_service_account: str = ""
 
+    # CRM OAuth. Blocked on the product name only - registering a Google Cloud
+    # project and a HubSpot app both require it (00-context/naming.md).
+    crm_token_key: str = ""
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    hubspot_client_id: str = ""
+    hubspot_client_secret: str = ""
+
+    # Admin allowlist: IdP subjects, from configuration.
+    #
+    # NOT a role column on the user row. A database-backed admin flag is one
+    # bad migration or one injection away from privilege escalation, and this
+    # surface can read every account in the system. Configuration means
+    # granting access requires a deploy, which is a reviewable event.
+    admin_subjects: list[str] = Field(default_factory=list)
+
+    # Notification delivery.
+    #
+    # No default for the key: EmailNotifier raises when it is missing rather
+    # than silently dropping mail, because a notification nobody receives is
+    # worse than a loud failure - nobody reports the first one.
+    resend_api_key: str = ""
+    notification_sender: str = "notifications@example.com"
+    
     @property
     def is_production(self) -> bool:
         return self.environment == "production"

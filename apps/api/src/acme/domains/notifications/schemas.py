@@ -43,3 +43,16 @@ class DeviceRegistration(BaseModel):
     expo_token: str = Field(min_length=1, max_length=255)
     platform: str = Field(pattern="^(ios|android)$")
     locale: str | None = Field(default=None, max_length=10)
+
+
+class NotificationPreferences(BaseModel):
+    """Per-kind channel opt-outs: {"reminder_due": {"push": true}}.
+
+    An absent kind means the default for that kind. Transactional kinds are
+    absent from this model entirely and cannot be disabled - a CRM that stopped
+    syncing means the user believes their contacts are safe when they are not.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    preferences: dict[str, dict[str, bool]] = Field(default_factory=dict)

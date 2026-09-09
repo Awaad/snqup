@@ -11,14 +11,26 @@ means a job that sat in the queue for an hour acts on current data.
 """
 
 from datetime import UTC, datetime, timedelta
+from uuid import UUID
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from acme.core.config import get_settings
 from acme.domains.connections.service import ConnectionMaintenance
 from acme.domains.events.service import EventDigestService
 from acme.domains.identity.service import IdentityService
-from acme.domains.notifications.service import NotificationsService
+from acme.domains.notifications.delivery import (
+    ROUTING,
+    Channel,
+    DeviceNotRegisteredError,
+    EmailNotifier,
+    PushNotifier,
+    channels_for,
+    within_quiet_hours,
+)
+from acme.domains.notifications.enums import NotificationKind
+from acme.domains.notifications.service import DeviceService, NotificationsService
 
 log = structlog.get_logger()
 
@@ -138,3 +150,154 @@ async def purge_deleted(session: AsyncSession, now: datetime | None = None) -> i
     await session.flush()
     log.info("purge.completed", purged=purged)
     return purged
+
+
+async def reconcile_billing(session: AsyncSession) -> int:
+    """Find entitlements whose subject no longer exists.
+
+    `entitlements.subject_id` is polymorphic with no foreign key, so the
+    database cannot catch these and they accumulate silently.
+
+    It ALERTS rather than repairing. Repeated divergence means a webhook
+    handler is wrong, and quietly cleaning up would hide the bug that is
+    producing the mess (ADR-0009).
+    """
+    from acme.domains.billing.service import EntitlementsService
+
+    identity = IdentityService(session)
+    subjects = await EntitlementsService(session).all_subjects()
+    existing = await identity.existing_subject_ids(subjects)
+
+    orphans = subjects - existing
+    if orphans:
+        log.error(
+            "billing.orphaned_entitlements",
+            count=len(orphans),
+            alert=True,
+            sample=[str(o) for o in list(orphans)[:5]],
+        )
+    return len(orphans)
+
+
+async def deliver_notifications(session: AsyncSession, now: datetime | None = None) -> int:
+    """Send what the other jobs wrote.
+
+    THE MISSING HALF. Every job above created `notifications` rows and nothing
+    ever delivered them - the system was write-only, and the only symptom would
+    have been users quietly never hearing from us. Nobody reports that.
+
+    Routing is per KIND (notifications/delivery.py): a follow-up reminder is
+    push-only because it is worthless an hour late, a post-event digest is
+    email because fourteen people is not a push notification.
+
+    Quiet hours DEFER rather than drop: the row stays undelivered and the next
+    run picks it up in the morning. Dropping it would lose the reminder
+    entirely, which is worse than a late one.
+    """
+    at = now or datetime.now(UTC)
+    notifications = NotificationsService(session)
+    identity = IdentityService(session)
+    devices = DeviceService(session)
+
+    settings = get_settings()
+    senders: dict[Channel, object] = {
+        Channel.EMAIL: EmailNotifier(settings.resend_api_key, settings.notification_sender),
+        Channel.PUSH: PushNotifier(),
+    }
+
+    sent = 0
+    for notification in await notifications.undelivered():
+        profile = await identity.notification_profile(notification.user_id)
+        tokens = await devices.active_tokens(notification.user_id)
+
+        prefs = profile.get("notification_prefs") or {}
+        timezone_name = profile.get("timezone")
+        channels = channels_for(
+            notification.kind,
+            prefs=prefs if isinstance(prefs, dict) else {},
+            has_device=bool(tokens),
+            has_email=bool(profile.get("email")),
+            now=at,
+            timezone_name=str(timezone_name) if timezone_name else None,
+        )
+
+        if not channels:
+            # Either genuinely undeliverable, or deferred by quiet hours. The
+            # difference matters: deferred must be retried, undeliverable must
+            # not.
+            if _deferred_by_quiet_hours(notification.kind, profile, at):
+                continue
+            await notifications.mark_undeliverable(notification, "no eligible channel")
+            continue
+
+        subject, body = notifications.render_email(notification)
+
+        for channel in channels:
+            sender = senders[channel]
+            recipients = tokens if channel is Channel.PUSH else [str(profile["email"])]
+            for recipient in recipients:
+                try:
+                    await sender.send(  # type: ignore[attr-defined]
+                        recipient=recipient,
+                        subject=subject,
+                        body=body,
+                        # Per (notification, channel, recipient) so a retry
+                        # after a timeout does not send a second copy.
+                        idempotency_key=(f"{notification.id}:{channel}:{recipient[:24]}"),
+                    )
+                    await notifications.mark_delivered(notification, channel, at)
+                    sent += 1
+                except DeviceNotRegisteredError as exc:
+                    # Dead token. Revoke it or every future send retries
+                    # against a device that no longer exists.
+                    await devices.revoke(exc.token)
+                    log.info("push.token_revoked", user_id=str(notification.user_id))
+                except Exception as exc:
+                    await notifications.mark_failed(notification, str(exc))
+                    log.warning(
+                        "notifications.delivery_failed",
+                        notification_id=str(notification.id),
+                        channel=str(channel),
+                        attempts=notification.delivery_attempts,
+                        error=str(exc),
+                    )
+
+    await session.flush()
+    log.info("notifications.delivered", count=sent)
+    return sent
+
+
+def _deferred_by_quiet_hours(
+    kind: NotificationKind, profile: dict[str, object], at: datetime
+) -> bool:
+    """Whether the only reason nothing sent is that it is the middle of the
+    night where this person is."""
+    routing = ROUTING.get(kind)
+    if routing is None or not routing.respects_quiet_hours:
+        return False
+    if Channel.PUSH not in routing.channels:
+        return False
+    timezone_name = profile.get("timezone")
+    return within_quiet_hours(at, str(timezone_name) if timezone_name else None)
+
+
+async def sync_crm_contacts(session: AsyncSession, connection_id: str, view_ids: list[str]) -> int:
+    """Push connections to a connected CRM.
+
+    Takes IDS and re-reads, like every job here: reconstructible after a Valkey
+    loss, and a job that sat in the queue for an hour acts on current data.
+
+    THE FAILURE THAT MATTERS is a duplicate contact in someone's CRM - the one
+    users complain about loudest and cannot easily undo. `crm_synced_contacts`
+    stores the provider's id per (connection, view), so a retry UPDATES rather
+    than creating.
+
+    An expired grant is not retried. CrmAuthError flags the connection and
+    stops; retrying a revoked token forever produces a queue that never drains
+    and a user who is never told their sync broke.
+    """
+    from acme.domains.crm.service import CrmSyncService
+
+    settings = get_settings()
+    service = CrmSyncService(session, settings.crm_token_key)
+    return await service.push(UUID(connection_id), [UUID(v) for v in view_ids])

@@ -156,6 +156,19 @@ CREATE TABLE user_profiles (
     consent_transactional  boolean NOT NULL DEFAULT true,
     consent_marketing      boolean NOT NULL DEFAULT false,
     consent_policy_version text,
+
+    -- Per-kind channel preferences: {"reminder_due": {"push": true,
+    -- "email": false}}. An absent kind means the default for that kind.
+    --
+    -- JSONB rather than a column per notification kind, because kinds are added
+    -- often and a migration per kind is the kind of friction that leads to
+    -- someone shipping a notification with no way to turn it off.
+    notification_prefs  jsonb NOT NULL DEFAULT '{}'::jsonb,
+
+    -- IANA name. A reminder at 3am is worse than no reminder, and the server
+    -- cannot know local time without this. Falls back to the event timezone,
+    -- then UTC.
+    timezone            text,
     -- Age gating. Career fairs mean students; the GDPR minimum varies by country.
     birth_year          smallint,
     created_at          timestamptz NOT NULL DEFAULT now(),
@@ -847,7 +860,23 @@ CREATE TABLE notifications (
     kind                text NOT NULL,
     payload             jsonb NOT NULL DEFAULT '{}'::jsonb,
     read_at             timestamptz,
+
+    -- DELIVERY STATE, per channel. Jobs wrote rows here and nothing ever sent
+    -- them: the notification system was write-only, and the only symptom would
+    -- have been users quietly never hearing from us.
+    --
+    -- Per channel rather than one `delivered_at` because push and email fail
+    -- independently and for different reasons - a dead device token is not an
+    -- email problem, and retrying both because one failed would double-send.
     pushed_at           timestamptz,
+    emailed_at          timestamptz,
+
+    -- Attempts and last error, so a permanently failing notification stops
+    -- rather than retrying forever. Without a counter the queue fills with rows
+    -- that can never succeed and buries the ones that can.
+    delivery_attempts   smallint NOT NULL DEFAULT 0,
+    delivery_error      text,
+
     created_at          timestamptz NOT NULL DEFAULT now(),
     -- Constrained like every other value set. It was free text, which meant a
     -- typo in a job produced a notification nothing renders and nothing
@@ -862,6 +891,10 @@ CREATE TABLE notifications (
 );
 CREATE INDEX notifications_user_idx ON notifications (user_id, created_at DESC)
     WHERE read_at IS NULL;
+-- The delivery worker's queue: anything not yet sent on either channel and not
+-- past its attempt ceiling.
+CREATE INDEX notifications_undelivered_idx ON notifications (created_at)
+    WHERE pushed_at IS NULL AND emailed_at IS NULL AND delivery_attempts < 5;
 
 
 -- =============================================================================
