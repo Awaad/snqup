@@ -13,10 +13,12 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from acme.api.deps import CurrentUserDep, RateLimiterDep, SessionDep
 from acme.domains.events.schemas import (
+    EventContentUpdate,
     EventCreate,
     EventOut,
     EventRegistration,
     EventStatsOut,
+    EventUpdate,
     PublicEventOut,
     RegistrationResult,
 )
@@ -85,6 +87,67 @@ async def join_event(payload: JoinRequest, session: SessionDep, user: CurrentUse
     return EventOut.model_validate(event)
 
 
+class MyEventsOut(BaseModel):
+    """Two lists, because they are two different things to a user.
+
+    The same person is often in both: an organizer attends other people's
+    events too, and merging them would put "your event" next to "an event you
+    went to" with no way to tell them apart.
+    """
+
+    organizing: list[EventOut]
+    attending: list[EventOut]
+
+
+@router.get("/events", response_model=MyEventsOut)
+async def my_events(session: SessionDep, user: CurrentUserDep) -> MyEventsOut:
+    """Events this user runs, and events they attend."""
+    organizing, attending = await EventAdminService(session, user.id).mine()
+    return MyEventsOut(
+        organizing=[EventOut.model_validate(e) for e in organizing],
+        attending=[EventOut.model_validate(e) for e in attending],
+    )
+
+
+@router.patch("/events/{event_id}", response_model=EventOut)
+async def update_event(
+    event_id: UUID,
+    payload: EventUpdate,
+    session: SessionDep,
+    user: CurrentUserDep,
+) -> EventOut:
+    """Change an event after creation.
+
+    This did not exist, which made every event immutable — venues move, times
+    shift, and an organizer who typed the wrong date had no recourse but to
+    create a second event and re-share the code.
+
+    Switching to PUBLIC re-checks domain verification. Otherwise an event
+    created private becomes an indexed public page with no verification at all.
+    """
+    event = await EventAdminService(session, user.id).update(event_id, payload)
+    return EventOut.model_validate(event)
+
+
+@router.put("/events/{event_id}/content", status_code=status.HTTP_204_NO_CONTENT)
+async def set_event_content(
+    event_id: UUID,
+    payload: EventContentUpdate,
+    session: SessionDep,
+    user: CurrentUserDep,
+) -> None:
+    """Write the public page's body and banner.
+
+    `event_content` was split from `events` in ADR-0027 and nothing could write
+    it, so a public event page could never have content — the split existed and
+    the feature did not.
+
+    `body` is Tiptap JSON, sanitized on write AND on read. Never raw HTML: this
+    renders on the UGC domain.
+    """
+    await EventAdminService(session, user.id).set_content(event_id, payload)
+
+
 @router.post("/events/{event_id}/roster", response_model=RosterImportResult)
 async def import_roster(
     event_id: UUID,
@@ -140,7 +203,7 @@ async def public_event(slug: str, session: SessionDep) -> PublicEventOut:
     false` so the page renders noindex - the difference between "anyone with
     the link" and "anyone at all" (ADR-0008).
     """
-    return await _render_public_event(session, await PublicEventService(session).by_slug(slug))
+    return await PublicEventService(session).page_by_slug(slug)
 
 
 @public_router.get("/events/code/{code}", response_model=PublicEventOut)
@@ -150,7 +213,7 @@ async def public_event_by_code(code: str, session: SessionDep) -> PublicEventOut
     Codes resolve regardless of visibility: holding one IS the invitation,
     which is the whole reason a private event has a code.
     """
-    return await _render_public_event(session, await PublicEventService(session).by_code(code))
+    return await PublicEventService(session).page_by_code(code)
 
 
 @public_router.post("/events/public/{slug}/register", response_model=RegistrationResult)
@@ -197,37 +260,4 @@ async def register_for_event(
         registered=True,
         already_registered=not created,
         join_code=event.code,
-    )
-
-
-async def _render_public_event(session: SessionDep, event: object) -> PublicEventOut:
-    """Assemble the page, including organizer branding and content.
-
-    Content comes through EventsService.content_for() rather than a join, so a
-    future CMS is a resolver change (ADR-0027).
-    """
-    from acme.domains.events.enums import EventVisibility
-    from acme.domains.events.service import EventsService
-    from acme.domains.identity.service import IdentityService
-
-    content = await EventsService(session).content_for(event.id)  # type: ignore[attr-defined]
-    org = await IdentityService(session).organization_branding(
-        event.organization_id  # type: ignore[attr-defined]
-    )
-
-    return PublicEventOut(
-        name=event.name,  # type: ignore[attr-defined]
-        venue=event.venue,  # type: ignore[attr-defined]
-        starts_at=event.starts_at,  # type: ignore[attr-defined]
-        ends_at=event.ends_at,  # type: ignore[attr-defined]
-        timezone=event.timezone,  # type: ignore[attr-defined]
-        organization_name=org.get("name") if org else None,
-        organization_logo_path=org.get("logo_path") if org else None,
-        body=content.body if content else None,
-        banner_path=content.banner_path if content else None,
-        # == not `is`. These are StrEnum members, and the ORM hands back a raw
-        # string before a refresh - so identity comparison silently returns
-        # False for a value that is correct. It failed for exactly that reason
-        # in a test, on a public event that reported itself as non-indexable.
-        indexable=event.visibility == EventVisibility.PUBLIC,  # type: ignore[attr-defined]
     )
