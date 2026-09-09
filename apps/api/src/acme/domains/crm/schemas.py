@@ -34,6 +34,10 @@ class CrmConnectionCreate(BaseModel):
     #: a long-lived token.
     code: str = Field(min_length=1)
     redirect_uri: str
+    #: The state issued by GET /v1/crm/authorize. Verified server-side and
+    #: burned - without it, an attacker can complete a flow with their own CRM
+    #: and hand the callback to a victim.
+    state: str = Field(min_length=1)
 
 
 class FieldMappingUpdate(BaseModel):
