@@ -13,9 +13,13 @@ from acme.api.routers.admin import router as admin_router
 from acme.api.routers.cards import public_router as cards_public_router
 from acme.api.routers.cards import router as cards_router
 from acme.api.routers.connections import router as connections_router
+from acme.api.routers.crm import router as crm_router
 from acme.api.routers.dashboard import router as dashboard_router
+from acme.api.routers.events import public_router as events_public_router
 from acme.api.routers.events import router as events_router
 from acme.api.routers.exchange import router as exchange_router
+from acme.api.routers.me import router as me_router
+from acme.api.routers.notifications import router as notifications_router
 from acme.api.routers.privacy import router as privacy_router
 from acme.api.routers.scan import router as scan_router
 from acme.api.routers.webhooks import router as webhooks_router
@@ -108,8 +112,12 @@ def create_app() -> FastAPI:
     app.include_router(connections_router)
     app.include_router(scan_router)
     app.include_router(events_router)
+    app.include_router(events_public_router)
     app.include_router(dashboard_router)
     app.include_router(privacy_router)
+    app.include_router(me_router)
+    app.include_router(notifications_router)
+    app.include_router(crm_router)
     app.include_router(webhooks_router)
     app.include_router(admin_router)
 
