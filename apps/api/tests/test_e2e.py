@@ -12,6 +12,7 @@ does something with it afterwards.
 
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import httpx
 import jwt
@@ -428,3 +429,308 @@ class TestPrivacy:
         assert response.status_code == 202
         assert response.json()["status"] == "scheduled"
         assert response.json()["grace_days"] == "30"
+
+
+class TestPublicEventSurface:
+    """The gap this closed: `events.slug` was in the schema with a unique index
+    and no endpoint used it, so an organizer putting "register at
+    example.net/e/devcon" on a slide had nowhere for that link to land.
+    """
+
+    async def _event(
+        self,
+        client: httpx.AsyncClient,
+        session: AsyncSession,
+        *,
+        visibility: str = "public",
+        slug: str | None = None,
+    ) -> tuple[Any, dict[str, str]]:
+        from acme.core.ids import new_id as _new_id
+        from acme.domains.events.models import Event
+        from acme.domains.identity.enums import OrgRole
+        from acme.domains.identity.models import Organization, OrganizationMember
+
+        subject, headers = await _register(client, session, "org")
+        from acme.domains.identity.service import IdentityService
+
+        user = await IdentityService(session).current_user(subject)
+        org = Organization(name="Acme Events", slug=f"acme-{_new_id().hex[:8]}", is_personal=False)
+        session.add(org)
+        await session.flush()
+        session.add(OrganizationMember(organization_id=org.id, user_id=user.id, role=OrgRole.OWNER))
+        event = Event(
+            organization_id=org.id,
+            created_by=user.id,
+            name="DevCon Berlin",
+            venue="Station",
+            code=f"C{_new_id().hex[:8].upper()}",
+            slug=slug or f"devcon-{_new_id().hex[:8]}",
+            visibility=visibility,
+            starts_at=datetime.now(UTC),
+            ends_at=datetime.now(UTC) + timedelta(hours=8),
+            timezone="Europe/Berlin",
+        )
+        session.add(event)
+        await session.flush()
+        return event, headers
+
+    async def test_a_stranger_can_view_a_public_event(
+        self, client: httpx.AsyncClient, session: AsyncSession
+    ) -> None:
+        event, _ = await self._event(client, session)
+
+        response = await client.get(f"/v1/events/public/{event.slug}")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["name"] == "DevCon Berlin"
+        assert body["organization_name"] == "Acme Events"
+        assert body["indexable"] is True
+        # A code is an invitation. Printing it on a public page would make
+        # every private event joinable by anyone who found the URL.
+        assert "code" not in body
+
+    async def test_an_unlisted_event_resolves_but_is_not_indexable(
+        self, client: httpx.AsyncClient, session: AsyncSession
+    ) -> None:
+        """The difference between "anyone with the link" and "anyone at all"."""
+        event, _ = await self._event(client, session, visibility="unlisted")
+
+        response = await client.get(f"/v1/events/public/{event.slug}")
+        assert response.status_code == 200
+        assert response.json()["indexable"] is False
+
+    async def test_a_private_event_never_resolves_by_slug(
+        self, client: httpx.AsyncClient, session: AsyncSession
+    ) -> None:
+        event, _ = await self._event(client, session, visibility="private")
+
+        response = await client.get(f"/v1/events/public/{event.slug}")
+        assert response.status_code == 404
+
+    async def test_a_private_event_still_resolves_by_code(
+        self, client: httpx.AsyncClient, session: AsyncSession
+    ) -> None:
+        """Holding a code IS the invitation, which is the whole reason a
+        private event has one."""
+        event, _ = await self._event(client, session, visibility="private")
+
+        response = await client.get(f"/v1/events/code/{event.code}")
+        assert response.status_code == 200
+        assert response.json()["name"] == "DevCon Berlin"
+
+    async def test_registration_needs_no_account(
+        self, client: httpx.AsyncClient, session: AsyncSession
+    ) -> None:
+        """The growth loop applied to events: on the roster before installing
+        anything."""
+        event, _ = await self._event(client, session)
+
+        response = await client.post(
+            f"/v1/events/public/{event.slug}/register",
+            json={"email": "stranger@example.com", "display_name": "Stranger"},
+        )
+        assert response.status_code == 200
+        assert response.json()["registered"] is True
+        # So a visitor who DOES have the app can deep-link rather than typing.
+        assert response.json()["join_code"] == event.code
+
+    async def test_registering_twice_is_not_an_error(
+        self, client: httpx.AsyncClient, session: AsyncSession
+    ) -> None:
+        """Someone who taps twice, or who was already on the organizer's
+        upload, should see success either way."""
+        event, _ = await self._event(client, session)
+        payload = {"email": "dupe@example.com"}
+
+        first = await client.post(f"/v1/events/public/{event.slug}/register", json=payload)
+        second = await client.post(f"/v1/events/public/{event.slug}/register", json=payload)
+
+        assert first.json()["already_registered"] is False
+        assert second.json()["already_registered"] is True
+        assert second.status_code == 200
+
+    async def test_the_honeypot_returns_success_and_records_nothing(
+        self, client: httpx.AsyncClient, session: AsyncSession
+    ) -> None:
+        """Returning success so a bot learns nothing about which field gave it
+        away."""
+        from sqlalchemy import select
+
+        from acme.domains.events.models import EventRosterEntry
+
+        event, _ = await self._event(client, session)
+        response = await client.post(
+            f"/v1/events/public/{event.slug}/register",
+            json={"email": "bot@example.com", "website": "http://spam.example"},
+        )
+        assert response.status_code == 200
+        rows = (
+            await session.execute(
+                select(EventRosterEntry).where(EventRosterEntry.event_id == event.id)
+            )
+        ).scalars()
+        assert list(rows) == []
+
+    async def test_self_registration_is_distinguishable_from_an_upload(
+        self, client: httpx.AsyncClient, session: AsyncSession
+    ) -> None:
+        """ "78% of your attendees connected" means something different against
+        an uploaded registration list than against landing-page signups.
+
+        Collapsing them would let the dashboard quietly overstate a number the
+        organizer repeats to sponsors.
+        """
+        from acme.domains.events.service import PublicEventService
+
+        event, _ = await self._event(client, session)
+        await client.post(
+            f"/v1/events/public/{event.slug}/register",
+            json={"email": "self@example.com"},
+        )
+
+        counts = await PublicEventService(session).registration_counts(event.id)
+        assert counts == {"self_registered": 1}
+
+
+class TestProvisioning:
+    """First sign-in.
+
+    THE BUG THIS COVERS made the product unusable: `provision()` existed and
+    nothing called it, so a brand-new Supabase user with a perfectly valid
+    token received AUTH_ACCOUNT_DISABLED. Nobody could sign up.
+
+    Every other test in this file called `provision()` directly, which is
+    exactly why none of them caught it.
+    """
+
+    async def test_a_new_user_is_provisioned_on_first_request(
+        self, client: httpx.AsyncClient
+    ) -> None:
+        subject = f"brand-new-{new_id().hex[:8]}"
+        token = jwt.encode(
+            {
+                "sub": subject,
+                "iss": ISSUER,
+                "aud": AUDIENCE,
+                "email": "newcomer@example.com",
+                "exp": datetime.now(UTC) + timedelta(minutes=5),
+            },
+            PRIVATE,
+            algorithm="RS256",
+        )
+
+        response = await client.get("/v1/me", headers={"Authorization": f"Bearer {token}"})
+        assert response.status_code == 200, response.text
+        assert response.json()["email"] == "newcomer@example.com"
+
+    async def test_the_display_name_comes_from_user_metadata(
+        self, client: httpx.AsyncClient
+    ) -> None:
+        """Supabase puts OAuth profile fields there. It is CLIENT-WRITABLE, so
+        it is used for a display name and never for identity."""
+        subject = f"named-{new_id().hex[:8]}"
+        token = jwt.encode(
+            {
+                "sub": subject,
+                "iss": ISSUER,
+                "aud": AUDIENCE,
+                "email": "named@example.com",
+                "user_metadata": {"full_name": "Sarah Jones"},
+                "exp": datetime.now(UTC) + timedelta(minutes=5),
+            },
+            PRIVATE,
+            algorithm="RS256",
+        )
+
+        response = await client.get("/v1/me", headers={"Authorization": f"Bearer {token}"})
+        assert response.json()["display_name"] == "Sarah Jones"
+
+    async def test_provisioning_is_idempotent(self, client: httpx.AsyncClient) -> None:
+        """Every authenticated request runs this path. A second row per request
+        would be catastrophic."""
+        subject = f"repeat-{new_id().hex[:8]}"
+        token = jwt.encode(
+            {
+                "sub": subject,
+                "iss": ISSUER,
+                "aud": AUDIENCE,
+                "email": "repeat@example.com",
+                "exp": datetime.now(UTC) + timedelta(minutes=5),
+            },
+            PRIVATE,
+            algorithm="RS256",
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+
+        first = await client.get("/v1/me", headers=headers)
+        second = await client.get("/v1/me", headers=headers)
+        assert first.json()["email"] == second.json()["email"]
+
+    async def test_a_token_without_an_email_is_refused(self, client: httpx.AsyncClient) -> None:
+        """Supabase issues tokens for phone and anonymous sign-in too, and
+        every downstream feature assumes an email. Failing here beats a
+        half-usable account."""
+        token = jwt.encode(
+            {
+                "sub": f"phone-{new_id().hex[:8]}",
+                "iss": ISSUER,
+                "aud": AUDIENCE,
+                "exp": datetime.now(UTC) + timedelta(minutes=5),
+            },
+            PRIVATE,
+            algorithm="RS256",
+        )
+
+        response = await client.get("/v1/me", headers={"Authorization": f"Bearer {token}"})
+        assert response.status_code == 401
+        assert response.json()["error"]["code"] == "AUTH_TOKEN_INVALID"
+
+    async def test_an_erased_account_is_not_resurrected(
+        self, client: httpx.AsyncClient, session: AsyncSession
+    ) -> None:
+        """The distinction that matters.
+
+        No row at all means a new user. A row with `deleted_at` set means
+        someone asked to be deleted, and provisioning would hand them a fresh
+        empty profile carrying their old id.
+        """
+        subject, headers = await _register(client, session, "erased")
+        await client.request("DELETE", "/v1/privacy/account", headers=headers)
+
+        response = await client.get("/v1/me", headers=headers)
+        assert response.status_code == 403
+        assert response.json()["error"]["code"] == "AUTH_ACCOUNT_DISABLED"
+
+
+class TestProfile:
+    async def test_timezone_round_trips(
+        self, client: httpx.AsyncClient, session: AsyncSession
+    ) -> None:
+        """Quiet hours for push are computed in LOCAL time. Without this the
+        server falls back to UTC, which is wrong for most of the world."""
+        _, headers = await _register(client, session, "tz")
+
+        updated = await client.patch("/v1/me", json={"timezone": "Europe/Berlin"}, headers=headers)
+        assert updated.status_code == 200
+        assert updated.json()["timezone"] == "Europe/Berlin"
+
+    async def test_patch_leaves_unsent_fields_alone(
+        self, client: httpx.AsyncClient, session: AsyncSession
+    ) -> None:
+        _, headers = await _register(client, session, "patchme")
+        await client.patch("/v1/me", json={"display_name": "Original"}, headers=headers)
+
+        result = await client.patch("/v1/me", json={"locale": "de"}, headers=headers)
+        assert result.json()["display_name"] == "Original"
+        assert result.json()["locale"] == "de"
+
+    async def test_marketing_consent_is_separate_from_transactional(
+        self, client: httpx.AsyncClient, session: AsyncSession
+    ) -> None:
+        """GDPR requires opt-in for marketing. One combined flag means either
+        spamming people or being unable to send a password reset."""
+        _, headers = await _register(client, session, "consent")
+
+        result = await client.patch("/v1/me", json={"consent_marketing": True}, headers=headers)
+        assert result.json()["consent_marketing"] is True
+        assert result.json()["consent_transactional"] is True

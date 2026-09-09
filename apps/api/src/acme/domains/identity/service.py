@@ -3,6 +3,7 @@
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from sqlalchemy import delete, select
@@ -11,6 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from acme.core.errors import ApiError
 from acme.core.ids import new_id
 from acme.domains.identity.enums import OrgRole
+
+if TYPE_CHECKING:
+    from acme.domains.identity.schemas import ProfileOut, ProfileUpdate
 from acme.domains.identity.models import (
     DomainVerification,
     Organization,
@@ -53,12 +57,101 @@ class IdentityService:
         """
         return await self._session.get(ReservedSlug, slug) is not None
 
-    async def current_user(self, auth_subject: str) -> CurrentUser:
-        """Map a verified JWT subject to our user.
+    async def profile(self, user_id: UUID) -> "ProfileOut":
+        from acme.domains.identity.schemas import ProfileOut
 
-        Raises rather than returning None: every caller of this needs a user,
-        and an Optional here would be checked inconsistently across dozens of
-        endpoints.
+        row = await self._session.get(UserProfile, user_id)
+        if row is None:
+            raise ApiError("AUTH_ACCOUNT_DISABLED", status_code=403)
+        return ProfileOut.model_validate(row)
+
+    async def update_profile(self, user_id: UUID, payload: "ProfileUpdate") -> "ProfileOut":
+        from acme.domains.identity.schemas import ProfileOut
+
+        row = await self._session.get(UserProfile, user_id)
+        if row is None:
+            raise ApiError("AUTH_ACCOUNT_DISABLED", status_code=403)
+
+        # exclude_unset, so an absent field is left alone rather than blanked.
+        for key, value in payload.model_dump(exclude_unset=True).items():
+            setattr(row, key, value)
+        await self._session.flush()
+        return ProfileOut.model_validate(row)
+
+    async def resolve_or_provision(
+        self, *, auth_subject: str, email: str | None, display_name: str | None
+    ) -> CurrentUser:
+        """Map a verified JWT to our user, creating one on FIRST sign-in.
+
+        This was the gap that made the product unusable: `provision()` existed
+        and nothing called it, so a brand-new Supabase user with a perfectly
+        valid token received AUTH_ACCOUNT_DISABLED. Nobody could sign up.
+
+        Provisioning here rather than at a /signup endpoint is deliberate.
+        Supabase has already authenticated the person; requiring a second,
+        separate call to create the account adds a step that can fail on its
+        own and leaves a verified user with no row when it does.
+
+        THE DISTINCTION THAT MATTERS: no row at all means a new user and we
+        create one. A row with `deleted_at` set means an ERASED account, and
+        provisioning would silently resurrect someone who asked to be deleted -
+        with a fresh empty profile carrying their old id. That is refused.
+        """
+        found = await self._users.by_auth_subject(auth_subject)
+        if found is not None:
+            user, profile = found
+            return CurrentUser(
+                id=user.id,
+                auth_subject=profile.auth_subject,
+                email=profile.email,
+                locale=profile.locale,
+            )
+
+        # Erased, not new. by_auth_subject filters deleted accounts, so this
+        # second look is what tells them apart.
+        if await self._was_erased(auth_subject):
+            raise ApiError(
+                "AUTH_ACCOUNT_DISABLED",
+                status_code=403,
+                message="this account was deleted",
+            )
+
+        if not email:
+            # Supabase issues tokens for phone and anonymous sign-in too, and
+            # every downstream feature - digests, CRM sync, account recovery -
+            # assumes an email. Failing here beats a half-usable account.
+            raise ApiError(
+                "AUTH_TOKEN_INVALID",
+                status_code=401,
+                message="token carries no email; cannot provision an account",
+            )
+
+        return await self.provision(
+            auth_subject=auth_subject, email=email, display_name=display_name
+        )
+
+    async def _was_erased(self, auth_subject: str) -> bool:
+        """Whether this subject belonged to an account that has been erased.
+
+        After a purge the profile row is gone, so there is nothing to match on
+        - which is correct: a purged account genuinely has no record, and the
+        person may legitimately sign up again. This catches the window between
+        deletion and purge, which is 30 days.
+        """
+        stmt = (
+            select(User)
+            .join(UserProfile, UserProfile.user_id == User.id)
+            .where(UserProfile.auth_subject == auth_subject)
+            .where(User.deleted_at.is_not(None))
+        )
+        return (await self._session.execute(stmt)).first() is not None
+
+    async def current_user(self, auth_subject: str) -> CurrentUser:
+        """Resolve an EXISTING user. Does not provision.
+
+        Kept separate from resolve_or_provision because the admin surface and
+        the job runner need to look a user up without the side effect of
+        creating one.
         """
         found = await self._users.by_auth_subject(auth_subject)
         if found is None:
@@ -188,6 +281,33 @@ class IdentityService:
         user.deleted_at = datetime.now(UTC)
         user.purge_after = purge_after
         await self._session.flush()
+
+    async def notification_profile(self, user_id: UUID) -> dict[str, object]:
+        """Everything delivery needs about a recipient, in one read.
+
+        Returns an empty dict for an erased user: their profile row is gone but
+        `notifications` may still hold rows, and delivering to a deleted account
+        would be both useless and a disclosure.
+        """
+        profile = await self._session.get(UserProfile, user_id)
+        if profile is None:
+            return {}
+        return {
+            "email": profile.email,
+            "timezone": profile.timezone,
+            "notification_prefs": dict(profile.notification_prefs),
+            "consent_transactional": profile.consent_transactional,
+        }
+
+    async def set_notification_prefs(
+        self, user_id: UUID, preferences: dict[str, dict[str, bool]]
+    ) -> dict[str, dict[str, bool]]:
+        profile = await self._session.get(UserProfile, user_id)
+        if profile is None:
+            raise ApiError("AUTH_ACCOUNT_DISABLED", status_code=403)
+        profile.notification_prefs = preferences
+        await self._session.flush()
+        return preferences
 
     async def export_profile(self, user_id: UUID) -> dict[str, object]:
         """The profile half of a GDPR export.

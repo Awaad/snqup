@@ -154,16 +154,69 @@ class JwksVerifier:
         return claims
 
 
+class SharedSecretVerifier:
+    """HS256 against Supabase's legacy JWT secret.
+
+    NECESSARY, not legacy-tolerance. Supabase projects come in two shapes and
+    the difference is invisible until a token arrives:
+
+      asymmetric keys   ES256/RS256, published at /auth/v1/.well-known/jwks.json.
+                        The default for new projects, and what JwksVerifier
+                        handles.
+      legacy JWT secret HS256 with a SHARED SECRET. There is no JWKS endpoint
+                        at all, so JwksVerifier fails on every request with
+                        "unknown signing key" - which reads like a key rotation
+                        problem and is not.
+
+    A shared secret means anyone holding it can MINT tokens, not merely verify
+    them. It must never leave the server, and rotating to asymmetric keys is
+    worth doing before launch.
+    """
+
+    def __init__(self, *, secret: str, issuer: str, audience: str) -> None:
+        self._secret = secret
+        self._issuer = issuer
+        self._audience = audience
+
+    async def verify(self, token: str) -> dict[str, Any]:
+        try:
+            claims: dict[str, Any] = jwt.decode(
+                token,
+                self._secret,
+                algorithms=["HS256"],
+                issuer=self._issuer,
+                audience=self._audience,
+            )
+        except jwt.ExpiredSignatureError as exc:
+            raise ApiError("AUTH_TOKEN_INVALID", status_code=401, message="expired") from exc
+        except jwt.InvalidTokenError as exc:
+            raise ApiError(
+                "AUTH_TOKEN_INVALID", status_code=401, message="verification failed"
+            ) from exc
+        return claims
+
+
 def build_verifier(settings: Any) -> TokenVerifier:
     """Pick a verifier from configuration.
 
-    Static keys are for tests and for local development against a fake issuer.
-    Anything real uses JWKS, because a pinned key and a rotating IdP is an
-    outage waiting for a date.
+    Three modes, and picking the wrong one fails on EVERY request rather than
+    intermittently, which is at least loud:
+
+      jwt_public_keys   static keys. Tests and local development only.
+      jwt_shared_secret HS256. Supabase projects still on the legacy JWT
+                        secret, which have NO JWKS endpoint.
+      otherwise         JWKS. The default for new Supabase projects, and the
+                        only one that survives key rotation without a deploy.
     """
     if settings.jwt_public_keys:
         return JwtVerifier(
             public_keys=settings.jwt_public_keys,
+            issuer=settings.jwt_issuer,
+            audience=settings.jwt_audience,
+        )
+    if settings.jwt_shared_secret:
+        return SharedSecretVerifier(
+            secret=settings.jwt_shared_secret,
             issuer=settings.jwt_issuer,
             audience=settings.jwt_audience,
         )

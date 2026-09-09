@@ -118,7 +118,23 @@ async def get_current_user(
     if not isinstance(subject, str) or not subject:
         raise ApiError("AUTH_TOKEN_INVALID", status_code=401, message="token has no subject")
 
-    return await IdentityService(session).current_user(subject)
+    # Provisions on FIRST sign-in. Without this a new Supabase user with a
+    # valid token gets AUTH_ACCOUNT_DISABLED and nobody can sign up.
+    #
+    # Supabase puts the email at the top level and repeats it under
+    # user_metadata; the top level is authoritative, and user_metadata is
+    # CLIENT-WRITABLE so it must never be trusted for identity.
+    email = claims.get("email")
+    metadata = claims.get("user_metadata")
+    display_name = (
+        metadata.get("full_name") or metadata.get("name") if isinstance(metadata, dict) else None
+    )
+
+    return await IdentityService(session).resolve_or_provision(
+        auth_subject=subject,
+        email=str(email) if isinstance(email, str) and email else None,
+        display_name=str(display_name) if display_name else None,
+    )
 
 
 CurrentUserDep = Annotated[CurrentUser, Depends(get_current_user)]
