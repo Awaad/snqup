@@ -15,6 +15,7 @@ from acme.api.routers.cards import router as cards_router
 from acme.api.routers.connections import router as connections_router
 from acme.api.routers.crm import router as crm_router
 from acme.api.routers.dashboard import router as dashboard_router
+from acme.api.routers.domains import router as domains_router
 from acme.api.routers.events import public_router as events_public_router
 from acme.api.routers.events import router as events_router
 from acme.api.routers.exchange import router as exchange_router
@@ -122,6 +123,7 @@ def create_app() -> FastAPI:
     app.include_router(crm_router)
     app.include_router(webhooks_router)
     app.include_router(admin_router)
+    app.include_router(domains_router)
 
     return app
 
